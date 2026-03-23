@@ -198,10 +198,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
         });
 
     } catch (error: any) {
-        try {
-            const fs = await import('fs');
-            fs.appendFileSync('C:/tmp/simpan_log.txt', new Date().toISOString() + ' - Generate Soal Error: ' + error.message + '\n' + error.stack + '\n');
-        } catch(e) {}
         console.error("Test Init Error:", error);
         return new Response(JSON.stringify({ status: 0, message: "Server error saat membuat sesi ujian" }), { status: 500 });
     }

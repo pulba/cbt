@@ -117,7 +117,8 @@ JSON.stringify({ error: 'Tipe login tidak valid' }),
 );
 }
 
-const token = await signToken(payload as any);
+const secret = (locals as any).runtime?.env?.JWT_SECRET;
+const token = await signToken(payload as any, secret);
 
 // Set cookie SESUAI role — dan hapus cookie role lain untuk mencegah konflik redirect
   if (payload.role === 'student') {

@@ -4,9 +4,10 @@ import { verifyToken } from '../lib/auth';
 
 // Hanya redirect ke admin jika session admin valid
 const adminToken = Astro.cookies.get('cbt_admin_session')?.value;
+const secret = (Astro.locals as any).runtime?.env?.JWT_SECRET;
 
 if (adminToken) {
-const u = await verifyToken(adminToken);
+const u = await verifyToken(adminToken, secret);
 if (u && u.role !== 'student') {
 return Astro.redirect('/admin');
 }

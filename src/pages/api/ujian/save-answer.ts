@@ -4,12 +4,13 @@ import { testQuestions, testQuestionAnswers } from '../../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { verifyToken } from '../../../lib/auth';
 
-export const POST: APIRoute = async ({ request, cookies }) => {
+export const POST: APIRoute = async ({ request, cookies, locals }) => {
     try {
-        const token = cookies.get('cbt_session')?.value;
+        const token = cookies.get('cbt_student_session')?.value;
         if (!token) return new Response(JSON.stringify({ status: 0 }), { status: 401 });
 
-        const user = await verifyToken(token);
+        const secret = (locals as any).runtime?.env?.JWT_SECRET;
+        const user = await verifyToken(token, secret);
         if (!user || user.role !== 'student') return new Response(JSON.stringify({ status: 0 }), { status: 403 });
 
         const body = await request.json();

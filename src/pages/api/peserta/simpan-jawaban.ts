@@ -2,12 +2,8 @@ import type { APIRoute } from "astro";
 import { db } from "../../../db";
 import { testQuestions, testQuestionAnswers, testUsers } from "../../../db/schema";
 import { eq, and } from "drizzle-orm";
-import fs from 'fs';
-
 function appendLog(msg: string) {
-    try {
-        fs.appendFileSync('C:/tmp/simpan_log.txt', new Date().toISOString() + ' - ' + msg + '\n');
-    } catch(e) {}
+    console.log(`[LOG] ${new Date().toISOString()} - ${msg}`);
 }
 
 export const POST: APIRoute = async ({ request, locals }) => {

@@ -4,9 +4,10 @@ import "../../styles/global.css";
 // If student is already logged in, redirect to dashboard
 const token = Astro.cookies.get("cbt_student_session")?.value;
 if (token) {
-	const { verifyToken } = await import("../../lib/auth");
-	const user = await verifyToken(token);
-	if (user && user.role === "student") {
+    const { verifyToken } = await import("../../lib/auth");
+    const secret = (Astro.locals as any).runtime?.env?.JWT_SECRET;
+    const user = await verifyToken(token, secret);
+    if (user && user.role === "student") {
 		return Astro.redirect("/siswa/ujian");
 	}
 }
