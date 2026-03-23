@@ -1,0 +1,147 @@
+---
+import AdminLayout from "../../../layouts/AdminLayout.astro";
+import { db } from "../../../db";
+import { userGroups, users, configs } from "../../../db/schema";
+import { eq, inArray } from "drizzle-orm";
+
+const allGroups = await db.select().from(userGroups);
+
+const groupId = Astro.url.searchParams.get('groupId');
+let pesertaList: any[] = [];
+let selectedGroup = null;
+
+if (groupId) {
+    selectedGroup = await db.select().from(userGroups).where(eq(userGroups.id, parseInt(groupId))).get();
+    if (selectedGroup) {
+        pesertaList = await db.select().from(users).where(eq(users.groupId, selectedGroup.id)).all();
+    }
+}
+
+// Ambil konfigurasi nama sekolah
+const schoolNameConfig = await db.select().from(configs).where(eq(configs.key, "school_name")).get();
+const schoolName = schoolNameConfig?.value || "SMK CBT Cerdas";
+---
+
+<AdminLayout title="Cetak Kartu Ujian">
+    <div class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 print:hidden">
+        <div>
+            <nav class="flex text-sm text-surface-500 mb-2" aria-label="Breadcrumb">
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a href="/admin/peserta" class="hover:text-primary-600 transition-colors">Peserta</a>
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium">Cetak Kartu</span>
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800">
+                Cetak Kartu Ujian
+            </h2>
+            <p class="text-sm text-surface-500 mt-1">
+                Pilih grup untuk mencetak kartu login ujian peserta secara massal.
+            </p>
+        </div>
+        
+        {pesertaList.length > 0 && (
+            <button onclick="window.print()" class="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30 flex items-center gap-2">
+                <i class="icon-printer w-5 h-5"></i> Cetak Sekarang
+            </button>
+        )}
+    </div>
+
+    <!-- Filter Form -->
+    <div class="bg-white p-6 rounded-xl border border-surface-200 shadow-sm mb-6 print:hidden">
+        <form method="get" class="flex flex-col sm:flex-row gap-4 items-end">
+            <div class="w-full sm:w-1/3">
+                <label for="groupId" class="block text-sm font-medium text-surface-700 mb-2">Pilih Grup / Kelas yang akan dicetak</label>
+                <select
+                    id="groupId"
+                    name="groupId"
+                    required
+                    class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                >
+                    <option value="" disabled selected={!groupId}>-- Pilih Grup --</option>
+                    {allGroups.map((g) => (
+                        <option value={g.id} selected={groupId === String(g.id)}>{g.name}</option>
+                    ))}
+                </select>
+            </div>
+            <button type="submit" class="px-5 py-2 text-white bg-surface-800 hover:bg-surface-700 font-medium rounded-lg transition">
+                Tampilkan Kartu
+            </button>
+        </form>
+    </div>
+
+    {pesertaList.length > 0 ? (
+        <div class="bg-white p-6 rounded-xl border border-surface-200 shadow-sm print:border-none print:shadow-none print:p-0 print:bg-transparent">
+            <!-- Grid untuk kartu-kartu yang akan di-print -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 print:grid-cols-2 print:gap-4 print:text-black mt-2">
+                {pesertaList.map(peserta => (
+                    <div class="border-2 border-black rounded-lg overflow-hidden flex flex-col print:break-inside-avoid bg-white h-full">
+                        <div class="py-2.5 px-3 text-center border-b-2 border-black">
+                            <span class="font-bold text-base tracking-wide">Computer Based-Test</span>
+                        </div>
+                        <div class="p-4 flex-1 flex flex-col">
+                            <table class="w-full text-[13px] font-medium border-separate border-spacing-y-1.5">
+                                <tbody>
+                                    <tr>
+                                        <td class="text-black w-20 align-top">Nama</td>
+                                        <td class="w-2 text-black">:</td>
+                                        <td class="text-black font-bold uppercase">{peserta.firstName}</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-black">Username</td>
+                                        <td>:</td>
+                                        <td class="text-black font-bold font-mono">{peserta.username}</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-black">Password</td>
+                                        <td>:</td>
+                                        <td class="text-black font-bold font-mono">{peserta.password}</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-black">Grup</td>
+                                        <td>:</td>
+                                        <td class="text-black font-bold uppercase">{selectedGroup?.name}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    ) : groupId ? (
+        <div class="bg-warning/10 border border-warning/20 p-6 rounded-xl text-center text-warning-700 print:hidden">
+            <i class="icon-info w-8 h-8 mx-auto mb-2 opacity-80"></i>
+            <h3 class="font-bold">Tidak ada peserta</h3>
+            <p class="text-sm mt-1">Grup ini tidak memiliki anggota siswa. Silakan tambahkan siswa terlebih dahulu agar bisa dicetak.</p>
+        </div>
+    ) : null}
+
+</AdminLayout>
+
+<style>
+    /* Print specific adjustments */
+    @media print {
+        @page {
+            margin: 1cm;
+            size: a4 portrait;
+        }
+        body {
+            background-color: white !important;
+            -webkit-print-color-adjust: exact;
+            color-adjust: exact;
+            color: black !important;
+        }
+        /* Fix for grid in print */
+        .print\:grid-cols-2 {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        }
+    }
+</style>

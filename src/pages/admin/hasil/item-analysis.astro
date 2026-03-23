@@ -1,0 +1,267 @@
+---
+import AdminLayout from "../../../layouts/AdminLayout.astro";
+import { db } from "../../../db";
+import {
+    tests,
+    testUsers,
+    testQuestions,
+    questions,
+    testQuestionAnswers,
+    questionAnswers,
+    topics,
+} from "../../../db/schema";
+import { eq, and, sql, inArray } from "drizzle-orm";
+
+const testIdParam = Astro.url.searchParams.get("testId");
+if (!testIdParam) return Astro.redirect("/admin/hasil");
+
+const testId = parseInt(testIdParam);
+const testData = await db.select().from(tests).where(eq(tests.id, testId)).get();
+if (!testData) return Astro.redirect("/admin/hasil");
+
+interface ChoiceStat {
+    text: string;
+    isCorrect: boolean;
+    count: number;
+    percent: number;
+}
+
+interface QuestionAnalysis {
+    id: number;
+    text: string;
+    type: number;
+    topicName: string | null;
+    total: number;
+    correct: number;
+    difficultyIndex: number;
+    choiceStats: ChoiceStat[];
+}
+
+// 1. Fetch all finished sessions for this test
+const finishedSessions = await db
+    .select({ id: testUsers.id })
+    .from(testUsers)
+    .where(and(eq(testUsers.testId, testId), eq(testUsers.status, 4)))
+    .all();
+
+const sessionCount = finishedSessions.length;
+const sessionIds = finishedSessions.map((s) => s.id);
+
+let analysisData: QuestionAnalysis[] = [];
+
+if (sessionCount > 0) {
+    // 2. Fetch all questions that were actually used in these sessions
+    const usedQuestions = await db
+        .select({
+            id: questions.id,
+            text: questions.text,
+            type: questions.type,
+            topicName: topics.name,
+        })
+        .from(testQuestions)
+        .innerJoin(questions, eq(testQuestions.questionId, questions.id))
+        .leftJoin(topics, eq(questions.topicId, topics.id))
+        .where(inArray(testQuestions.testUserId, sessionIds))
+        .groupBy(questions.id)
+        .all();
+
+    // 3. For each question, aggregate stats
+    // We'll do this in memory for simplicity unless performance is an issue
+    // In a massive system, we'd use complex SQL aggregations
+    for (const q of usedQuestions) {
+        // Count total appearances
+        const appearances = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(testQuestions)
+            .where(and(eq(testQuestions.questionId, q.id), inArray(testQuestions.testUserId, sessionIds)))
+            .get();
+        
+        const total = appearances?.count || 0;
+
+        // Count correct answers (for PG)
+        let correct = 0;
+        let choiceStats: ChoiceStat[] = [];
+
+        if (q.type === 1) {
+            const correctQuery = await db
+                .select({ count: sql<number>`count(*)` })
+                .from(testQuestionAnswers)
+                .innerJoin(testQuestions, eq(testQuestionAnswers.testQuestionId, testQuestions.id))
+                .innerJoin(questionAnswers, eq(testQuestionAnswers.answerId, questionAnswers.id))
+                .where(and(
+                    eq(testQuestions.questionId, q.id),
+                    inArray(testQuestions.testUserId, sessionIds),
+                    eq(testQuestionAnswers.isSelected, true),
+                    eq(questionAnswers.isCorrect, true)
+                ))
+                .get();
+            correct = correctQuery?.count || 0;
+
+            // Distractor analysis
+            const choices = await db
+                .select({ id: questionAnswers.id, text: questionAnswers.text, isCorrect: questionAnswers.isCorrect })
+                .from(questionAnswers)
+                .where(eq(questionAnswers.questionId, q.id))
+                .all();
+            
+            for (const choice of choices) {
+                const choiceCount = await db
+                    .select({ count: sql<number>`count(*)` })
+                    .from(testQuestionAnswers)
+                    .innerJoin(testQuestions, eq(testQuestionAnswers.testQuestionId, testQuestions.id))
+                    .where(and(
+                        eq(testQuestions.questionId, q.id),
+                        inArray(testQuestions.testUserId, sessionIds),
+                        eq(testQuestionAnswers.answerId, choice.id),
+                        eq(testQuestionAnswers.isSelected, true)
+                    ))
+                    .get();
+                choiceStats.push({
+                    text: choice.text,
+                    isCorrect: !!choice.isCorrect,
+                    count: choiceCount?.count || 0,
+                    percent: total > 0 ? Math.round(((choiceCount?.count || 0) / total) * 100) : 0
+                });
+            }
+        }
+
+        analysisData.push({
+            ...q,
+            total,
+            correct,
+            difficultyIndex: total > 0 ? (correct / total) : 0,
+            choiceStats
+        });
+    }
+}
+
+// Sort by difficulty index (hardest first)
+analysisData.sort((a, b) => a.difficultyIndex - b.difficultyIndex);
+
+function getDifficultyLabel(index: number) {
+    if (index < 0.3) return { label: "Sangat Sulit", color: "text-rose-700 bg-rose-100 border-rose-200" };
+    if (index < 0.7) return { label: "Sedang", color: "text-amber-700 bg-amber-100 border-amber-200" };
+    return { label: "Mudah", color: "text-emerald-700 bg-emerald-100 border-emerald-200" };
+}
+---
+
+<AdminLayout title={`Analisis Butir Soal: ${testData.name}`}>
+    <div class="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+            <nav class="flex text-sm text-surface-500 mb-2" aria-label="Breadcrumb">
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a href="/admin/hasil" class="hover:text-primary-600 transition-colors">Laporan</a>
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium">Analisis Butir Soal</span>
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800 flex items-center">
+                <a href={`/admin/hasil?testId=${testId}`} class="mr-3 p-1.5 rounded-lg hover:bg-surface-100 transition-colors text-surface-500">
+                    <i class="icon-arrow-left w-5 h-5"></i>
+                </a>
+                Analisis Butir Soal (Agregat)
+            </h2>
+            <p class="text-sm text-surface-500 mt-1 ml-10">Berikut adalah tingkat kesulitan dan distribusi jawaban dari {sessionCount} peserta.</p>
+        </div>
+    </div>
+
+    {sessionCount === 0 ? (
+        <div class="bg-amber-50 border border-amber-200 rounded-2xl p-12 text-center">
+            <i class="icon-alert-circle w-12 h-12 mx-auto mb-4 text-amber-500 opacity-50"></i>
+            <h3 class="text-lg font-bold text-amber-800">Belum Ada Data Selesai</h3>
+            <p class="text-amber-700 mt-2">Analisis butir soal hanya tersedia untuk peserta yang sudah menyelesaikan ujian (Status: Selesai).</p>
+        </div>
+    ) : (
+        <div class="space-y-8">
+            <!-- Summary Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-white p-6 rounded-2xl border border-surface-200 shadow-sm">
+                    <span class="text-[10px] uppercase font-black tracking-widest text-surface-400">Total Soal Dianalisis</span>
+                    <div class="text-3xl font-black text-surface-800 mt-1">{analysisData.length}</div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-surface-200 shadow-sm">
+                    <span class="text-[10px] uppercase font-black tracking-widest text-surface-400">Peserta Selesai</span>
+                    <div class="text-3xl font-black text-primary-600 mt-1">{sessionCount}</div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-surface-200 shadow-sm">
+                    <span class="text-[10px] uppercase font-black tracking-widest text-surface-400">Rerata Indeks Kesulitan</span>
+                    <div class="text-3xl font-black text-amber-600 mt-1">
+                        {(analysisData.reduce((s, a) => s + a.difficultyIndex, 0) / (analysisData.length || 1)).toFixed(2)}
+                    </div>
+                </div>
+            </div>
+
+            <!-- List of Questions with Analysis -->
+            <div class="space-y-6">
+                <h3 class="font-black text-surface-800 uppercase tracking-widest text-sm flex items-center gap-2">
+                    <i class="icon-bar-chart-2 w-4 h-4 text-primary-500"></i> Detail Kesulitan Per Soal
+                </h3>
+
+                {analysisData.map((item, idx) => {
+                    const diff = getDifficultyLabel(item.difficultyIndex);
+                    return (
+                        <div class="bg-white rounded-2xl border border-surface-200 overflow-hidden shadow-sm">
+                            <div class="px-6 py-4 bg-surface-50/50 border-b border-surface-200 flex flex-wrap items-center justify-between gap-4">
+                                <div class="flex items-center gap-3">
+                                    <span class="w-8 h-8 rounded-lg bg-surface-800 text-white flex items-center justify-center font-bold text-sm">
+                                        {idx + 1}
+                                    </span>
+                                    <div>
+                                        <div class="text-xs font-bold text-surface-400 uppercase tracking-wider">{item.topicName || 'Umum'} · {item.type === 1 ? 'Pilihan Ganda' : 'Esai'}</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-4">
+                                    <div class="text-right">
+                                        <div class="text-[10px] font-black text-surface-400 uppercase">Indeks Kesulitan</div>
+                                        <div class="text-lg font-black text-surface-800">{Math.round(item.difficultyIndex * 100)}%</div>
+                                    </div>
+                                    <span class={`px-3 py-1 rounded-full border text-[10px] font-black uppercase ${diff.color}`}>
+                                        {diff.label}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="p-6">
+                                <div class="prose prose-sm max-w-none text-surface-800 mb-6" set:html={item.text} />
+
+                                {item.type === 1 && (
+                                    <div class="space-y-3">
+                                        <div class="text-xs font-black text-surface-400 uppercase tracking-widest mb-2">Analisis Pengecoh (Distractors)</div>
+                                        {item.choiceStats.map((choice: any) => (
+                                            <div class="relative">
+                                                <div class="flex items-center justify-between text-xs mb-1.5 px-1">
+                                                    <div class="flex items-center gap-2">
+                                                        {choice.isCorrect ? 
+                                                            <i class="icon-check-circle w-3.5 h-3.5 text-emerald-500"></i> : 
+                                                            <i class="icon-circle w-3.5 h-3.5 text-surface-300"></i>
+                                                        }
+                                                        <span class={`font-medium ${choice.isCorrect ? 'text-emerald-700' : 'text-surface-600'}`}>
+                                                            <span set:html={choice.text} />
+                                                        </span>
+                                                    </div>
+                                                    <span class="font-bold text-surface-800">{choice.count} orang ({choice.percent}%)</span>
+                                                </div>
+                                                <div class="h-2 bg-surface-100 rounded-full overflow-hidden">
+                                                    <div 
+                                                        class={`h-full rounded-full transition-all duration-1000 ${choice.isCorrect ? 'bg-emerald-500' : 'bg-primary-400/50'}`}
+                                                        style={`width: ${choice.percent}%`}
+                                                    ></div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    )}
+</AdminLayout>

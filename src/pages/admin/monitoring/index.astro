@@ -1,0 +1,222 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import { db } from '../../../db';
+import { tests, testUsers, users } from '../../../db/schema';
+import { eq, desc } from 'drizzle-orm';
+
+// Fetch active tests
+const activeTests = await db.select().from(tests).orderBy(desc(tests.id));
+
+// If a test is selected via query param
+const selectedTestId = Astro.url.searchParams.get('testId');
+let participantStatus: any[] = [];
+
+if (selectedTestId) {
+    // Left join testUsers and users
+    participantStatus = await db
+        .select({
+            id: testUsers.id,
+            status: testUsers.status,
+            startTime: testUsers.creationTime,
+            username: users.username,
+            name: users.firstName,
+            usedToken: testUsers.usedToken,
+            violationCount: testUsers.violationCount,
+        })
+        .from(testUsers)
+        .innerJoin(users, eq(testUsers.userId, users.id))
+        .where(eq(testUsers.testId, parseInt(selectedTestId)));
+}
+---
+
+<AdminLayout title="Live Monitoring">
+    <div class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div>
+            <h2 class="text-xl font-bold text-surface-800">Live Monitoring Ujian</h2>
+            <p class="text-sm text-surface-500 mt-1">Pantau progres siswa dan aktivitas ujian secara real-time.</p>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="window.location.reload()" class="px-4 py-2 bg-white border border-surface-200 text-surface-700 text-sm font-medium rounded-lg hover:bg-surface-50 transition shadow-sm">
+                <i class="icon-refresh-cw w-4 h-4 inline-block mr-1"></i> Refresh Data
+            </button>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="bg-white p-4 rounded-xl border border-surface-200 shadow-sm mb-6 flex flex-wrap gap-4 items-end">
+        <form method="get" class="flex-1 flex gap-4 items-end">
+            <div class="flex-1 max-w-sm">
+                <label class="block text-xs font-semibold text-surface-600 mb-1.5 uppercase tracking-wide">Pilih Ujian Aktif</label>
+                <select name="testId" class="w-full px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-700 focus:ring-primary-500 focus:border-primary-500 transition-shadow">
+                    <option value="">-- Pilih Ujian untuk Dipantau --</option>
+                    {activeTests.map((t) => (
+                        <option value={t.id} selected={selectedTestId === t.id.toString()}>{t.name}</option>
+                    ))}
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30">
+                Pantau Ujian
+            </button>
+        </form>
+        
+        {selectedTestId && (
+            <div class="px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3">
+                <span class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                </span>
+                <span class="text-xs font-bold text-amber-700 uppercase tracking-widest">Live Auto-Refresh (30s)</span>
+            </div>
+        )}
+    </div>
+
+    {selectedTestId ? (
+        <div class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden flex flex-col">
+            <div class="p-4 border-b border-surface-200 bg-surface-50/50 flex justify-between items-center">
+                <h3 class="text-sm font-semibold text-surface-700">Daftar Peserta Terhubung ({participantStatus.length} orang)</h3>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-surface-600">
+                    <thead class="bg-surface-50 border-b border-surface-200 text-surface-700 font-semibold">
+                        <tr>
+                            <th class="px-5 py-3 w-12 text-center">No</th>
+                            <th class="px-5 py-3">Username / Nama Peserta</th>
+                            <th class="px-5 py-3 text-center">Waktu Login</th>
+                            <th class="px-5 py-3 text-center">Status Pengerjaan</th>
+                            <th class="px-5 py-3 text-center">Aksi (Reset)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-100">
+                        {participantStatus.length === 0 ? (
+                            <tr>
+                                <td colspan="5" class="px-5 py-8 text-center text-surface-500">Belum ada peserta yang memulai ujian ini.</td>
+                            </tr>
+                        ) : (
+                            participantStatus.map((p, index) => (
+                                <tr class="hover:bg-surface-50/50 transition-colors">
+                                    <td class="px-5 py-4 text-center text-surface-400 text-xs">{index + 1}</td>
+                                    <td class="px-5 py-4">
+                                        <div class="font-bold text-surface-800">{p.username}</div>
+                                        <div class="text-xs text-surface-500 mt-0.5">{p.name || '-'}</div>
+                                    </td>
+                                    <td class="px-5 py-4 text-center text-surface-600 font-mono text-xs">
+                                        {p.startTime ? new Date(p.startTime).toLocaleTimeString('id-ID') : '-'}
+                                    </td>
+                                    <td class="px-5 py-4 text-center">
+                                        {p.status === 1 ? (
+                                            <span class="px-2.5 py-1 bg-primary-50 border border-primary-200 text-primary-700 rounded-full text-xs font-bold animate-pulse">
+                                                Mengerjakan
+                                            </span>
+                                        ) : p.status === 4 ? (
+                                            <span class="px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full text-xs font-bold">
+                                                Selesai
+                                            </span>
+                                        ) : p.status === 10 ? (
+                                            <span class="px-2.5 py-1 bg-rose-600 border border-rose-700 text-white rounded-full text-xs font-bold shadow-sm">
+                                                TERKUNCI
+                                            </span>
+                                        ) : (
+                                            <span class="px-2.5 py-1 bg-surface-100 text-surface-600 rounded-full text-xs font-medium">
+                                                Status: {p.status}
+                                            </span>
+                                        )}
+                                        {p.violationCount! > 0 && (
+                                            <div class="mt-1.5 text-[10px] font-bold text-rose-500 uppercase tracking-tighter">
+                                                {p.violationCount}x Pelanggaran
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td class="px-5 py-4 text-center">
+                                        <div class="flex items-center justify-center gap-2">
+                                            {p.status === 10 && (
+                                                <button 
+                                                    onclick={`handleAction('unlock', ${p.id}, '${p.username}')`}
+                                                    title="Buka Blokir" 
+                                                    class="w-8 h-8 rounded-lg text-emerald-600 hover:bg-emerald-50 transition inline-flex items-center justify-center border border-emerald-100"
+                                                >
+                                                    <i class="icon-unlock w-4 h-4"></i>
+                                                </button>
+                                            )}
+                                            {p.status === 1 && (
+                                                <button 
+                                                    onclick={`handleAction('finish', ${p.id}, '${p.username}')`}
+                                                    title="Paksa Selesai" 
+                                                    class="w-8 h-8 rounded-lg text-emerald-600 hover:bg-emerald-50 transition inline-flex items-center justify-center border border-emerald-100"
+                                                >
+                                                    <i class="icon-check-circle w-4 h-4"></i>
+                                                </button>
+                                            )}
+                                            <button 
+                                                onclick={`handleAction('reset', ${p.id}, '${p.username}')`}
+                                                title="Reset Sesi (Hapus Progress)" 
+                                                class="w-8 h-8 rounded-lg text-rose-600 hover:bg-rose-50 transition inline-flex items-center justify-center border border-rose-100"
+                                            >
+                                                <i class="icon-refresh-cw w-4 h-4"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    ) : (
+        <div class="bg-surface-50 border border-surface-200 border-dashed rounded-xl p-12 text-center text-surface-500">
+            <i class="icon-activity w-12 h-12 mx-auto mb-3 text-surface-300"></i>
+            <p>Silakan pilih ujian pada form di atas untuk memantau aktivitas siswa secara real-time.</p>
+        </div>
+    )}
+</AdminLayout>
+
+{selectedTestId && (
+    <script>
+        // Auto refresh page every 30 seconds for live monitoring
+        const refreshTimer = setTimeout(() => {
+            window.location.reload();
+        }, 30000);
+
+        // Action handlers
+        (window as any).handleAction = async (type: 'reset' | 'finish' | 'unlock', sessionId: number, username: string) => {
+            let actionText = '';
+            let url = '';
+            
+            if (type === 'reset') {
+                actionText = 'MENGHAPUS semua jawaban dan mengulang sesi';
+                url = '/api/admin/monitoring/reset-session';
+            } else if (type === 'finish') {
+                actionText = 'MEMBERHENTIKAN pengerjaan dan menyimpan hasil saat ini';
+                url = '/api/admin/monitoring/force-finish';
+            } else if (type === 'unlock') {
+                actionText = 'MEMBUKA BLOKIR dan mereset pelanggaran';
+                url = '/api/admin/monitoring/unlock';
+            }
+            
+            if (!confirm(`Apakah Anda yakin ingin ${actionText} untuk siswa "${username}"?`)) return;
+
+            // Stop refresh while processing
+            clearTimeout(refreshTimer);
+
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId })
+                });
+
+                const data = await res.json();
+                if (data.status === 1) {
+                    alert(data.message || 'Berhasil');
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Gagal memproses permintaan'));
+                }
+            } catch (e) {
+                console.error(e);
+                alert('Terjadi kesalahan jaringan');
+            }
+        }
+    </script>
+)}

@@ -1,0 +1,598 @@
+---
+import StudentLayout from "../../layouts/StudentLayout.astro";
+import { db } from "../../db";
+import { tests, testGroups, testTopicSets, testUsers, users, userGroups, configs } from "../../db/schema";
+import { eq, and, min, max, sum, count, sql, desc } from "drizzle-orm";
+
+const sessionUser = Astro.locals.user;
+
+if (!sessionUser || sessionUser.role !== 'student') {
+    return Astro.redirect('/');
+}
+
+// Fetch user profile details
+const userProfile = await db
+    .select({
+        firstName: users.firstName,
+        username: users.username,
+        groupName: userGroups.name
+    })
+    .from(users)
+    .leftJoin(userGroups, eq(users.groupId, userGroups.id))
+    .where(eq(users.id, sessionUser.id))
+    .get();
+
+// Fetch tests mapped to this user's group
+const rawTests = await db
+    .select({
+        id: tests.id,
+        name: tests.name,
+        detail: tests.detail,
+        isActive: tests.isActive,
+        showResult: tests.showResult,
+    })
+    .from(tests)
+    .innerJoin(testGroups, eq(tests.id, testGroups.testId))
+    .where(eq(testGroups.groupId, sessionUser.groupId || -1))
+    .all();
+
+// For each test, fetch timing info + topic count + session status
+const availableTests = await Promise.all(rawTests.filter(t => t.isActive).map(async (test) => {
+    const timing = await db
+        .select({
+            beginTime: min(testTopicSets.beginTime),
+            endTime: max(testTopicSets.endTime),
+            durationMinutes: sum(testTopicSets.durationMinutes),
+            topicCount: count(testTopicSets.id),
+        })
+        .from(testTopicSets)
+        .where(eq(testTopicSets.testId, test.id))
+        .get();
+
+    // Check if student already has a session (ignore archived status 5)
+    const session = await db
+        .select({ id: testUsers.id, status: testUsers.status })
+        .from(testUsers)
+        .where(and(eq(testUsers.testId, test.id), eq(testUsers.userId, sessionUser.id), sql`${testUsers.status} != 5`))
+        .orderBy(desc(testUsers.id))
+        .get();
+
+    const now = new Date();
+    const begin = timing?.beginTime ? new Date(timing.beginTime) : null;
+    const end = timing?.endTime ? new Date(timing.endTime) : null;
+    const isEmpty = !timing || (timing.topicCount ?? 0) === 0;
+    const isFinished = session?.status === 4;
+    const isLocked = session?.status === 10;
+    
+    let status: 'upcoming' | 'open' | 'closed' | 'empty' | 'finished' | 'locked' = 'open';
+    if (end && now > end) status = 'closed'; // Closed takes priority for visibility
+    else if (isLocked) status = 'locked';
+    else if (isFinished) status = 'finished';
+    else if (isEmpty) status = 'empty';
+    else if (begin && now < begin) status = 'upcoming';
+
+    return {
+        ...test,
+        beginTime: timing?.beginTime ?? null,
+        endTime: timing?.endTime ?? null,
+        durationMinutes: timing?.durationMinutes ?? 0,
+        topicCount: timing?.topicCount ?? 0,
+        status,
+        isLocked,
+        sessionStatus: session?.status ?? null,
+    };
+}));
+
+// Error handling from query params
+const error = Astro.url.searchParams.get('error');
+let errorMessage = "";
+if (error === 'violation_lock') {
+    errorMessage = "⚠️ UJIAN TERKUNCI: Anda telah terdeteksi meninggalkan halaman ujian sebanyak 3 kali. Silakan hubungi pengawas untuk membuka blokir.";
+} else if (error === 'browser_lock') {
+    errorMessage = "⚠️ AKSES DITOLAK: Ujian ini hanya dapat dikerjakan melalui aplikasi Xambro / Exambrowser.";
+}
+
+// Fetch Information/Announcement
+const infoConfig = await db.select().from(configs).where(eq(configs.key, "cbt_informasi")).get();
+const informasi = infoConfig?.value || "";
+
+const now = new Date();
+const dateStr = now.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+---
+
+<StudentLayout title="Dashboard Ujian">
+    <!-- Error Alert -->
+    {errorMessage && (
+        <div class="mb-6 bg-rose-50 border-2 border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-4 text-rose-700 animate-fade-in shadow-sm">
+            <div class="w-10 h-10 shrink-0 rounded-xl bg-rose-100 flex items-center justify-center border border-rose-200">
+                <i class="icon-alert-octagon text-xl"></i>
+            </div>
+            <div class="flex-1">
+                <p class="text-sm font-bold leading-relaxed">{errorMessage}</p>
+                <p class="text-xs text-rose-600 mt-1">Jika admin sudah mereset status Anda, silakan <strong>Keluar</strong> terlebih dahulu lalu login kembali.</p>
+            </div>
+            <a href="/api/auth/logout" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition shadow-md shadow-rose-600/20 flex items-center gap-2">
+                <i class="icon-log-out text-base"></i> Keluar Sekarang
+            </a>
+        </div>
+    )}
+
+    <!-- Hero Banner -->
+    <div class="relative bg-gradient-to-br from-primary-700 via-primary-600 to-indigo-700 rounded-2xl p-6 sm:p-8 mb-8 shadow-xl overflow-hidden mt-4 text-white">
+        <!-- Decorative shapes -->
+        <div class="absolute -top-12 -right-12 w-56 h-56 bg-white/5 rounded-full blur-2xl pointer-events-none"></div>
+        <div class="absolute -bottom-16 -left-10 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute top-4 right-8 w-24 h-24 bg-white/5 rounded-2xl rotate-12 pointer-events-none hidden sm:block"></div>
+
+        <div class="relative z-10 flex flex-col sm:flex-row items-center sm:items-start gap-5">
+            <!-- Avatar -->
+            <div class="w-20 h-20 shrink-0 rounded-2xl bg-white/15 border-2 border-white/25 backdrop-blur-sm flex items-center justify-center shadow-lg">
+                <i class="icon-user text-white text-4xl leading-none"></i>
+            </div>
+
+            <!-- Info -->
+            <div class="text-center sm:text-left flex-1">
+                <p class="text-primary-200 font-medium text-xs uppercase tracking-widest mb-1">Selamat Datang,</p>
+                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">
+                    {userProfile?.firstName || sessionUser.username}
+                </h1>
+                <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-3">
+                    <div class="flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-sm rounded-full border border-white/20 text-xs font-medium">
+                        <i class="icon-hash text-base text-primary-200"></i>
+                        <span class="text-white/80">No. Peserta:</span>
+                        <span class="font-bold tracking-widest text-white">{userProfile?.username}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-sm rounded-full border border-white/25 text-xs font-bold text-white">
+                        <i class="icon-users text-base"></i>
+                        {userProfile?.groupName?.toLowerCase().startsWith('kelas') ? userProfile.groupName : `Kelas ${userProfile?.groupName || "Umum"}`}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Clock widget -->
+            <div class="shrink-0 text-right hidden sm:block">
+                <div class="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl px-4 py-3">
+                    <div class="text-xs text-primary-200 uppercase tracking-wider font-medium mb-0.5">{dateStr.split(',')[0]}</div>
+                    <div class="text-2xl font-mono font-black text-white" id="live-clock">{timeStr}</div>
+                    <div class="text-[10px] text-primary-200 mt-0.5 leading-snug">{dateStr.split(',').slice(1).join(',').trim()}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Announcement Section -->
+    {informasi && (
+        <div class="mb-8 bg-amber-50 border-2 border-amber-200 rounded-2xl p-6 shadow-sm relative overflow-hidden">
+            <div class="absolute -top-6 -right-6 w-24 h-24 bg-amber-100/50 rounded-full blur-2xl"></div>
+            <div class="flex gap-4 relative z-10">
+                <div class="w-12 h-12 shrink-0 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center border border-amber-200">
+                    <i class="icon-megaphone text-2xl"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-sm font-bold text-amber-800 uppercase tracking-wider mb-1 flex items-center gap-2">
+                        Papan Pengumuman
+                        <span class="flex h-2 w-2 rounded-full bg-amber-500 animate-ping"></span>
+                    </h3>
+                    <div class="text-amber-900/80 leading-relaxed text-sm prose prose-amber max-w-none" set:html={informasi} />
+                </div>
+            </div>
+        </div>
+    )}
+
+    <!-- Tata Tertib & Peringatan Section (Accordion) -->
+    <div class="mb-8 bg-white border-2 border-rose-100 rounded-2xl overflow-hidden shadow-sm transition-all duration-300">
+        <button 
+            id="btn-toggle-rules"
+            class="w-full bg-rose-50 px-6 py-4 flex items-center justify-between hover:bg-rose-100/50 transition-colors group"
+        >
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shadow-sm">
+                    <i class="icon-alert-triangle text-xl"></i>
+                </div>
+                <div class="text-left">
+                    <h3 class="text-xs font-bold text-rose-700 uppercase tracking-widest flex items-center gap-2">
+                        Tata Tertib & Peringatan Penting
+                    </h3>
+                    <p class="text-[10px] text-rose-600/70 font-medium mt-0.5">Klik untuk melihat detail tata tertib ujian</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="px-2 py-0.5 bg-rose-600 text-white text-[10px] font-black rounded uppercase">Wajib Baca</span>
+                <i id="rules-chevron" class="icon-chevron-down text-rose-400 text-xl transition-transform duration-300"></i>
+            </div>
+        </button>
+        
+        <div id="rules-content" class="hidden overflow-hidden bg-white">
+            <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-rose-100 animate-slide-down">
+                <div class="space-y-4">
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 shrink-0 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center font-bold text-sm italic">1</div>
+                        <div>
+                            <h4 class="text-sm font-bold text-surface-800 mb-0.5">Larangan Multi-Tab & Aplikasi</h4>
+                            <p class="text-xs text-surface-500 leading-relaxed">Dilarang membuka tab kepingin atau aplikasi lain selama ujian. Sistem akan **otomatis mengunci** ujian jika terdeteksi keluar halaman.</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 shrink-0 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center font-bold text-sm italic">2</div>
+                        <div>
+                            <h4 class="text-sm font-bold text-surface-800 mb-0.5">Keamanan Akun Peserta</h4>
+                            <p class="text-xs text-surface-500 leading-relaxed">Dilarang membagikan username dan password kepada siapapun. Satu akun hanya dapat aktif di **satu perangkat** pada satu waktu.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-4">
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 shrink-0 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center font-bold text-sm italic">3</div>
+                        <div>
+                            <h4 class="text-sm font-bold text-surface-800 mb-0.5">Integritas Pengerjaan</h4>
+                            <p class="text-xs text-surface-500 leading-relaxed">Tetaplah berada di halaman soal hingga selesai menekan tombol **Selesai Ujian**. Segala bentuk kecurangan akan terekam oleh sistem.</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 shrink-0 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center font-bold text-sm italic">4</div>
+                        <div>
+                            <h4 class="text-sm font-bold text-surface-800 mb-0.5">Kesiapan Teknis</h4>
+                            <p class="text-xs text-surface-500 leading-relaxed">Pastikan baterai perangkat cukup dan koneksi internet stabil sebelum memulai. Gunakan **Exambrowser** jika diwajibkan oleh sekolah.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section Title -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-5 gap-3">
+        <div>
+            <h2 class="text-lg font-bold text-surface-800 flex items-center gap-2">
+                <i class="icon-book-open text-xl text-primary-600"></i>
+                Ujian Tersedia untuk {userProfile?.groupName?.toLowerCase().startsWith('kelas') ? userProfile.groupName : `Kelas ${userProfile?.groupName}`}
+            </h2>
+            <p class="text-xs text-surface-500 mt-0.5 ml-7">
+                {availableTests.filter(t => t.status !== 'closed').length > 0 
+                    ? `${availableTests.filter(t => t.status !== 'closed').length} ujian ditemukan` 
+                    : 'Tidak ada ujian saat ini'}
+            </p>
+        </div>
+        <button onclick="window.location.reload()" class="flex items-center gap-1.5 text-xs text-surface-500 hover:text-surface-700 bg-surface-100 hover:bg-surface-200 border border-surface-200 px-3 py-1.5 rounded-lg transition font-medium">
+            <i class="icon-refresh-cw text-sm"></i> Perbarui
+        </button>
+    </div>
+
+    <!-- Available Tests Grid -->
+    {
+        availableTests.length === 0 ? (
+            <div class="bg-white border-2 border-dashed border-surface-200 rounded-2xl p-12 text-center flex flex-col items-center justify-center min-h-[280px]">
+                <div class="w-16 h-16 bg-surface-50 rounded-2xl flex items-center justify-center mb-4 text-surface-300 border border-surface-200">
+                    <i class="icon-coffee text-4xl" />
+                </div>
+                <h3 class="text-lg font-bold text-surface-700 tracking-tight">Tidak Ada Ujian Aktif</h3>
+                <p class="text-surface-400 mt-1.5 text-sm max-w-xs leading-relaxed">
+                    Saat ini belum ada jadwal ujian untuk kelas <strong class="text-surface-600">{userProfile?.groupName}</strong>. Selamat beristirahat!
+                </p>
+                <button onclick="window.location.reload()" class="mt-5 px-4 py-2 bg-surface-100 hover:bg-surface-200 text-surface-600 text-sm font-semibold rounded-lg transition flex items-center gap-2 border border-surface-200">
+                    <i class="icon-refresh-cw text-base"></i> Segarkan
+                </button>
+            </div>
+        ) : (
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                {availableTests
+                    .filter(test => test.status !== 'closed')  // hide expired exams
+                    .map((test) => {
+                    const isClosed = test.status === 'closed';
+                    const isUpcoming = test.status === 'upcoming';
+                    const isEmpty = test.status === 'empty';
+                    const isOpen = test.status === 'open';
+                    const isFinished = test.status === 'finished';
+                    const isDisabled = isClosed || isUpcoming || isEmpty || isFinished;
+                    
+                    return (
+                        <div class={`bg-white rounded-2xl border shadow-sm flex flex-col overflow-hidden transition-all duration-300 group
+                            ${isDisabled ? 'border-surface-200 opacity-70' : 'border-surface-200 hover:shadow-xl hover:-translate-y-1'}`}>
+                            
+                            <!-- Status Bar -->
+                            <div class={`h-1 w-full ${isClosed ? 'bg-surface-200' : isUpcoming ? 'bg-amber-400' : isEmpty ? 'bg-rose-400' : isFinished ? 'bg-emerald-400' : 'bg-gradient-to-r from-primary-500 to-indigo-500'}`} />
+                            
+                            <!-- Card Header -->
+                            <div class="px-5 pt-5 pb-4">
+                                <div class="flex items-start justify-between gap-3 mb-3">
+                                    <!-- Status Badge -->
+                                    <span class={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0
+                                        ${isClosed ? 'bg-surface-100 text-surface-400'
+                                        : isUpcoming ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                        : isEmpty ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                        : isFinished ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : test.isLocked ? 'bg-rose-50 text-rose-700 border border-rose-400'
+                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                                        <span class={`w-1.5 h-1.5 rounded-full inline-block ${isClosed ? 'bg-surface-400' : isUpcoming ? 'bg-amber-500' : isEmpty ? 'bg-rose-500' : isFinished ? 'bg-emerald-500' : test.isLocked ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`} />
+                                        {isClosed ? 'Tutup' : isUpcoming ? 'Belum Mulai' : isEmpty ? 'Belum Siap' : isFinished ? 'Selesai' : test.isLocked ? 'Terkunci' : 'Buka'}
+                                    </span>
+                                    <!-- Duration -->
+                                    <span class="flex items-center gap-1 text-xs font-bold text-primary-700 bg-primary-50 border border-primary-100 px-2 py-1 rounded-lg">
+                                        <i class="icon-clock text-sm" />
+                                        {test.durationMinutes} menit
+                                    </span>
+                                </div>
+                                
+                                <h3 class={`font-bold text-base leading-snug ${isClosed ? 'text-surface-400' : 'text-surface-800 group-hover:text-primary-700 transition-colors'}`}>
+                                    {test.name}
+                                </h3>
+                                
+                                {test.detail && (
+                                    <div class="text-xs text-surface-500 mt-2 line-clamp-2 leading-relaxed prose-sm max-w-none" set:html={test.detail} />
+                                )}
+                            </div>
+
+                            <!-- Schedule Info -->
+                            <div class="mx-5 mb-4 p-3 bg-surface-50 rounded-xl border border-surface-100 space-y-2">
+                                <div class="flex items-center gap-2 text-xs text-surface-600">
+                                    <div class="w-5 h-5 rounded-md bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                                        <i class="icon-play text-xs" />
+                                    </div>
+                                    <span class="text-surface-500">Dibuka:</span>
+                                    <strong class="text-surface-700 ml-auto text-right">
+                                        {test.beginTime
+                                            ? new Date(test.beginTime).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
+                                            : 'Kapan saja'}
+                                    </strong>
+                                </div>
+                                <div class="flex items-center gap-2 text-xs text-surface-600">
+                                    <div class="w-5 h-5 rounded-md bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                                        <i class="icon-x text-xs" />
+                                    </div>
+                                    <span class="text-surface-500">Ditutup:</span>
+                                    <strong class="text-surface-700 ml-auto text-right">
+                                        {test.endTime
+                                            ? new Date(test.endTime).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
+                                            : 'Tidak ada batas'}
+                                    </strong>
+                                </div>
+                            </div>
+
+
+                            <!-- Action Button -->
+                            <div class="mt-auto px-5 pb-5">
+                                {isFinished ? (
+                                    <div class="w-full py-3 px-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-bold rounded-xl flex justify-center items-center gap-2 select-none">
+                                        <i class="icon-check-circle text-xl" />
+                                        Ujian Telah Diselesaikan
+                                    </div>
+                                ) : test.isLocked ? (
+                                    <div class="w-full py-3 px-4 bg-rose-600 text-white text-sm font-bold rounded-xl flex justify-center items-center gap-2 shadow-lg shadow-rose-600/20 select-none">
+                                        <i class="icon-lock text-xl" />
+                                        Ujian Terkunci (Pelanggaran)
+                                    </div>
+                                ) : isEmpty ? (
+                                    <div class="w-full py-3 px-4 bg-rose-50 border border-rose-200 text-rose-600 text-sm font-bold rounded-xl flex justify-center items-center gap-2 cursor-not-allowed select-none">
+                                        <i class="icon-alert-triangle text-xl opacity-80" />
+                                        Soal Belum Dikonfigurasi Admin
+                                    </div>
+                                ) : isUpcoming ? (
+                                    <div class="w-full py-3 px-4 bg-amber-50 border border-amber-200 text-amber-700 text-sm font-bold rounded-xl flex justify-center items-center gap-2 cursor-not-allowed select-none">
+                                        <i class="icon-clock text-xl" />
+                                        Belum Waktunya
+                                    </div>
+                                ) : test.sessionStatus === 1 ? (
+                                    <button
+                                        onclick={`startExam(${test.id}, null)`}
+                                        class="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-amber-600/20 flex justify-center items-center gap-2 group-hover:shadow-amber-600/40"
+                                    >
+                                        Lanjutkan Ujian
+                                        <i class="icon-arrow-right text-xl" />
+                                    </button>
+                                ) : (
+                                    <button
+                                        onclick={`startExam(${test.id}, null)`}
+                                        class="w-full py-3 px-4 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-600/20 flex justify-center items-center gap-2 group-hover:shadow-primary-600/40"
+                                    >
+                                        Mulai Ujian
+                                        <i class="icon-arrow-right text-xl" />
+                                    </button>
+                                )}
+                            </div>
+
+                        </div>
+                    );
+                })}
+            </div>
+        )
+    }
+
+    <!-- Token Modal -->
+    <div
+        id="token-modal"
+        class="fixed inset-0 z-[100] hidden items-center justify-center p-4 bg-surface-900/60 backdrop-blur-sm"
+    >
+        <div
+            class="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden transform scale-95 opacity-0 transition-all duration-300"
+            id="token-modal-content"
+        >
+            <!-- Modal Header -->
+            <div class="bg-gradient-to-br from-primary-600 to-indigo-600 p-6 text-white text-center">
+                <div class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3 border border-white/30">
+                    <i class="icon-key text-3xl"></i>
+                </div>
+                <h3 class="text-lg font-extrabold tracking-tight">Token Pengawas</h3>
+                <p class="text-primary-200 text-xs mt-1" id="token-test-name">Minta token ke pengawas sebelum memulai.</p>
+            </div>
+
+            <div class="p-6">
+                <input type="hidden" id="token-test-id" value="" />
+
+                <div class="mb-5">
+                    <label class="block text-xs font-bold text-surface-500 uppercase tracking-wider mb-2 text-center">Masukkan Kode Token</label>
+                    <input
+                        type="text"
+                        id="token-input"
+                        class="w-full font-mono text-center tracking-[0.5em] uppercase px-4 py-4 bg-surface-50 border-2 border-surface-200 rounded-xl text-2xl font-black text-surface-800 placeholder:text-surface-300 focus:outline-none focus:ring-0 focus:border-primary-500 focus:bg-white transition-all shadow-inner"
+                        placeholder="XXXXXX"
+                        maxlength="6"
+                        autocomplete="off"
+                    />
+                    <div class="mt-2 text-center h-5">
+                        <p class="text-xs font-bold text-danger hidden" id="token-error">
+                            <i class="icon-alert-circle w-3 h-3 inline-block mr-1"></i>
+                            Token tidak valid!
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex gap-3">
+                    <button
+                        onclick="closeTokenModal()"
+                        class="flex-1 py-2.5 px-4 bg-surface-100 hover:bg-surface-200 text-surface-700 text-sm font-bold rounded-xl transition border border-surface-200"
+                    >Batal</button>
+                    <button
+                        onclick="verifyTokenAndStart()"
+                        class="flex-1 py-2.5 px-4 bg-primary-600 hover:bg-primary-500 text-white text-sm font-bold rounded-xl transition shadow-md shadow-primary-600/25"
+                        id="token-submit-btn"
+                    >
+                        Proses <i class="icon-arrow-right w-3.5 h-3.5 inline-block ml-1 opacity-80"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</StudentLayout>
+
+<script>
+    // Live clock update
+    function updateClock() {
+        const el = document.getElementById('live-clock');
+        if (!el) return;
+        el.textContent = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    }
+    setInterval(updateClock, 1000);
+
+    // Token Modal
+    const modal = document.getElementById("token-modal");
+    const modalContent = document.getElementById("token-modal-content");
+    const inputId = document.getElementById("token-test-id") as HTMLInputElement;
+    const inputName = document.getElementById("token-test-name");
+    const tokenInput = document.getElementById("token-input") as HTMLInputElement;
+    const errorMsg = document.getElementById("token-error");
+    const submitBtn = document.getElementById("token-submit-btn") as HTMLButtonElement;
+
+    (window as any).openTokenModal = (testId: number, testName: string) => {
+        if (!modal || !modalContent) return;
+        inputId.value = testId.toString();
+        if (inputName) inputName.textContent = `Ujian: ${testName}`;
+        tokenInput.value = "";
+        if (errorMsg) errorMsg.classList.add("hidden");
+
+        modal.classList.remove("hidden");
+        modal.classList.add("flex");
+        document.body.style.overflow = 'hidden';
+
+        setTimeout(() => {
+            modalContent.classList.remove("scale-95", "opacity-0");
+            modalContent.classList.add("scale-100", "opacity-100");
+            tokenInput.focus();
+        }, 10);
+    };
+
+    (window as any).closeTokenModal = () => {
+        if (!modal || !modalContent) return;
+        modalContent.classList.remove("scale-100", "opacity-100");
+        modalContent.classList.add("scale-95", "opacity-0");
+        document.body.style.overflow = '';
+        setTimeout(() => {
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }, 300);
+    };
+
+    tokenInput?.addEventListener("input", function() {
+        this.value = this.value.toUpperCase();
+        if (errorMsg) errorMsg.classList.add("hidden");
+    });
+    tokenInput?.addEventListener("keyup", function(e) {
+        if (e.key === 'Enter') (window as any).verifyTokenAndStart();
+    });
+
+    (window as any).startExam = (testId: number, _token: null) => {
+        // Go to confirmation page first
+        window.location.href = `/siswa/konfirmasi/${testId}`;
+    };
+
+    (window as any).verifyTokenAndStart = async () => {
+        const testId = inputId.value;
+        const token = tokenInput.value.toUpperCase();
+
+        if (!token) {
+            if (errorMsg) {
+                errorMsg.innerHTML = '<i class="icon-alert-circle w-3 h-3 inline-block mr-1"></i> Harap masukkan token';
+                errorMsg.classList.remove("hidden");
+            }
+            return;
+        }
+
+        const originalHtml = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="icon-loader w-4 h-4 animate-spin inline-block mr-1"></i> Memuat...';
+        submitBtn.disabled = true;
+
+        try {
+            const res = await fetch(`/api/peserta/generate-soal`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ testId, token }),
+            });
+            const data = await res.json();
+
+            if (data.status) {
+                // Token valid — go to confirmation page with token passed as query param
+                (window as any).closeTokenModal();
+                window.location.href = `/siswa/konfirmasi/${testId}?token=${token}`;
+            } else {
+                if (errorMsg) {
+                    errorMsg.innerHTML = `<i class="icon-alert-circle w-3 h-3 inline-block mr-1"></i> ${data.message || 'Token Salah'}`;
+                    errorMsg.classList.remove("hidden");
+                }
+                tokenInput.classList.add('animate-shake');
+                setTimeout(() => tokenInput.classList.remove('animate-shake'), 500);
+            }
+        } catch (e) {
+            if (errorMsg) {
+                errorMsg.innerHTML = '<i class="icon-alert-circle w-3 h-3 inline-block mr-1"></i> Kesalahan Jaringan';
+                errorMsg.classList.remove("hidden");
+            }
+        } finally {
+            submitBtn.innerHTML = originalHtml;
+            submitBtn.disabled = false;
+        }
+    };
+
+    // Tata Tertib Accordion Toggle
+    const btnToggleRules = document.getElementById('btn-toggle-rules');
+    const rulesContent = document.getElementById('rules-content');
+    const rulesChevron = document.getElementById('rules-chevron');
+
+    btnToggleRules?.addEventListener('click', () => {
+        const isHidden = rulesContent?.classList.contains('hidden');
+        if (isHidden) {
+            rulesContent?.classList.remove('hidden');
+            rulesChevron?.classList.add('rotate-180');
+        } else {
+            rulesContent?.classList.add('hidden');
+            rulesChevron?.classList.remove('rotate-180');
+        }
+    });
+</script>
+
+<style>
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+        20%, 40%, 60%, 80% { transform: translateX(5px); }
+    }
+    .animate-shake {
+        animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+    }
+    @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-slide-down {
+        animation: slideDown 0.3s ease-out forwards;
+    }
+</style>

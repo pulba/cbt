@@ -1,0 +1,366 @@
+---
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+---
+
+<AdminLayout title="Topik / Mata Pelajaran">
+    <div
+        class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4"
+    >
+        <div>
+            <nav
+                class="flex text-sm text-surface-500 mb-2"
+                aria-label="Breadcrumb"
+            >
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a
+                            href="/admin/soal"
+                            class="hover:text-primary-600 transition-colors"
+                            >Bank Soal</a
+                        >
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium"
+                                >Topik & Mata Pelajaran</span
+                            >
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800">Manajemen Topik</h2>
+            <p class="text-sm text-surface-500 mt-1">
+                Kelola daftar modul, mata pelajaran, atau bab untuk
+                pengelompokan soal.
+            </p>
+        </div>
+        <div class="flex gap-2">
+            <a
+                href="/admin/soal/topik/tambah"
+                class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30"
+            >
+                <i class="icon-plus w-4 h-4 inline-block mr-1"></i> Tambah Topik
+            </a>
+        </div>
+    </div>
+
+    <!-- Stats & Filters -->
+    <div
+        class="bg-white p-4 rounded-xl border border-surface-200 shadow-sm mb-6 flex flex-wrap gap-4 items-center justify-between"
+    >
+        <div class="flex items-center gap-3 w-full sm:w-auto">
+            <div class="flex items-center gap-2">
+                <input
+                    type="checkbox"
+                    id="check-all"
+                    class="w-4 h-4 text-primary-600 border-surface-300 rounded focus:ring-primary-500"
+                />
+                <label for="check-all" class="text-sm text-surface-600"
+                    >Pilih Semua</label
+                >
+            </div>
+            <div class="w-px h-6 bg-surface-200 mx-1"></div>
+            <button
+                id="btn-hapus-massal"
+                class="px-3 py-1.5 bg-danger/10 text-danger hover:bg-danger/20 rounded-md text-sm font-medium transition cursor-not-allowed opacity-50 flex items-center gap-1"
+                disabled
+            >
+                <i class="icon-trash-2 w-3.5 h-3.5"></i> Hapus Terpilih
+            </button>
+        </div>
+        <div class="relative w-full sm:w-64">
+            <i
+                class="icon-search absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400"
+            ></i>
+            <input
+                type="text"
+                id="search-input"
+                placeholder="Cari nama topik..."
+                class="w-full pl-9 pr-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            />
+        </div>
+    </div>
+
+    <!-- Data Table Container -->
+    <div
+        class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden"
+        id="topik-container"
+    >
+        <table class="w-full text-left text-sm text-surface-600">
+            <thead
+                class="bg-surface-50 border-b border-surface-200 text-surface-700 font-semibold"
+            >
+                <tr>
+                    <th class="px-5 py-3 w-10 text-center">#</th>
+                    <th class="px-5 py-3 w-12 text-center">No</th>
+                    <th class="px-5 py-3">Nama Topik</th>
+                    <th class="px-5 py-3">Deskripsi</th>
+                    <th class="px-5 py-3 text-center w-24">Status</th>
+                    <th class="px-5 py-3 w-40 text-center">Aksi</th>
+                </tr>
+            </thead>
+            <tbody id="topik-table-body" class="divide-y divide-surface-100">
+                <tr>
+                    <td
+                        colspan="6"
+                        class="px-5 py-8 text-center text-surface-400"
+                    >
+                        <i class="icon-loader w-6 h-6 animate-spin mx-auto mb-2"
+                        ></i> Memuat data topik...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Pagination Placeholder -->
+        <div
+            class="p-4 border-t border-surface-200 flex justify-between items-center bg-surface-50"
+        >
+            <span class="text-xs text-surface-500" id="pagination-info"
+                >Menampilkan 0 dari total topik</span
+            >
+            <div class="flex gap-1" id="pagination-controls">
+                <button
+                    id="btn-prev"
+                    disabled
+                    title="Previous"
+                    class="w-8 h-8 rounded-md flex items-center justify-center border border-surface-200 bg-white text-surface-400"
+                >
+                    <i class="icon-chevron-left w-4 h-4"></i>
+                </button>
+                <button
+                    id="btn-next"
+                    disabled
+                    title="Next"
+                    class="w-8 h-8 rounded-md flex items-center justify-center border border-surface-200 bg-white text-surface-400"
+                >
+                    <i class="icon-chevron-right w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</AdminLayout>
+
+<script>
+    let currentPage = 1;
+    const limit = 20;
+
+    async function loadTopics(page = 1) {
+        const tbody = document.getElementById("topik-table-body");
+        const paginationInfo = document.getElementById("pagination-info");
+        const btnPrev = document.getElementById(
+            "btn-prev",
+        ) as HTMLButtonElement;
+        const btnNext = document.getElementById(
+            "btn-next",
+        ) as HTMLButtonElement;
+
+        const search =
+            (document.getElementById("search-input") as HTMLInputElement)
+                ?.value || "";
+
+        if (!tbody) return;
+
+        try {
+            const res = await fetch(
+                `/api/soal/topik?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`,
+            );
+            const json = await res.json();
+
+            if (json.data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-8 text-center text-surface-500">Belum ada Topik / Mata Pelajaran yang terdaftar.</td></tr>`;
+                if (paginationInfo)
+                    paginationInfo.textContent = "Menampilkan 0 topik";
+                btnPrev.disabled = true;
+                btnNext.disabled = true;
+                return;
+            }
+
+            let html = "";
+            json.data.forEach((topik: any, idx: number) => {
+                const statusBadge = topik.status
+                    ? `<span class="px-2 py-1 bg-success/10 text-success rounded-md text-xs font-semibold">Aktif</span>`
+                    : `<span class="px-2 py-1 bg-surface-200 text-surface-600 rounded-md text-xs font-semibold">Nonaktif</span>`;
+
+                html += `
+                    <tr class="hover:bg-surface-50/50 transition-colors">
+                        <td class="px-5 py-4 text-center">
+                            <input type="checkbox" value="${topik.id}" class="row-checkbox w-4 h-4 text-primary-600 border-surface-300 rounded focus:ring-primary-500">
+                        </td>
+                        <td class="px-5 py-4 text-center text-surface-400">${idx + 1 + (page - 1) * limit}</td>
+                        <td class="px-5 py-4 font-bold text-surface-800">${topik.name}</td>
+                        <td class="px-5 py-4 text-surface-600">${topik.description || "-"}</td>
+                        <td class="px-5 py-4 text-center">${statusBadge}</td>
+                        <td class="px-5 py-4 text-center">
+                            <div class="flex items-center justify-center gap-1.5">
+                                <a href="/admin/soal/daftar/${topik.id}" title="Kelola Soal" class="w-8 h-8 rounded-lg text-primary-600 bg-primary-50 hover:bg-primary-100 transition flex items-center justify-center">
+                                    <i class="icon-list w-4 h-4"></i>
+                                </a>
+                                <div class="w-px h-4 bg-surface-200 mx-1"></div>
+                                <a href="/admin/soal/topik/edit/${topik.id}" title="Edit Topik" class="w-8 h-8 rounded-lg text-surface-600 hover:text-primary-600 hover:bg-primary-50 transition flex items-center justify-center">
+                                    <i class="icon-edit-2 w-4 h-4"></i>
+                                </a>
+                                <button title="Hapus Topik" class="w-8 h-8 rounded-lg text-surface-500 hover:text-danger hover:bg-danger/10 transition flex items-center justify-center disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-surface-500" ${topik.inUse ? 'disabled title="Topik sedang digunakan dalam ujian"' : ""} onclick="deleteTopic(${topik.id}, '${topik.name}')">
+                                    <i class="icon-trash-2 w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+
+            // Update Checkbox Listeners
+            updateCheckboxListeners();
+
+            // Pagination Info
+            if (paginationInfo) {
+                const start = (page - 1) * limit + 1;
+                const end = Math.min(page * limit, json.total);
+                paginationInfo.textContent = `Menampilkan ${start}-${end} dari ${json.total} topik`;
+            }
+
+            btnPrev.disabled = page <= 1;
+            btnNext.disabled = page >= json.totalPages;
+
+            btnPrev.onclick = () => {
+                currentPage = page - 1;
+                loadTopics(currentPage);
+            };
+            btnNext.onclick = () => {
+                currentPage = page + 1;
+                loadTopics(currentPage);
+            };
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-8 text-center text-danger">Gagal memuat data. Silakan refresh halaman.</td></tr>`;
+        }
+    }
+
+    (window as any).deleteTopic = async (id: number, name: string) => {
+        if (
+            !confirm(
+                `Apakah Anda yakin ingin menghapus topik "${name}" beserta semua soalnya?`,
+            )
+        )
+            return;
+
+        try {
+            const res = await fetch("/api/soal/topik", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: [id] }),
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert("Gagal menghapus: " + data.error);
+                return;
+            }
+            loadTopics(currentPage);
+        } catch (e) {
+            alert("Terjadi kesalahan jaringan.");
+        }
+    };
+
+    // Events
+    document.getElementById("search-input")?.addEventListener("input", () => {
+        currentPage = 1;
+        loadTopics(1);
+    });
+
+    // Initial load
+    loadTopics(1);
+
+    // Mass Delete Logic
+    const checkAll = document.getElementById("check-all") as HTMLInputElement;
+    const btnHapusMassal = document.getElementById(
+        "btn-hapus-massal",
+    ) as HTMLButtonElement;
+
+    checkAll?.addEventListener("change", (e) => {
+        const isChecked = (e.target as HTMLInputElement).checked;
+        const checkboxes = document.querySelectorAll(
+            ".row-checkbox",
+        ) as NodeListOf<HTMLInputElement>;
+
+        checkboxes.forEach((cb) => (cb.checked = isChecked));
+        updateDeleteButtonState();
+    });
+
+    function updateCheckboxListeners() {
+        const checkboxes = document.querySelectorAll(
+            ".row-checkbox",
+        ) as NodeListOf<HTMLInputElement>;
+        checkboxes.forEach((cb) => {
+            cb.addEventListener("change", () => {
+                const allChecked =
+                    Array.from(checkboxes).length > 0 &&
+                    Array.from(checkboxes).every((c) => c.checked);
+                if (checkAll) checkAll.checked = allChecked;
+                updateDeleteButtonState();
+            });
+        });
+    }
+
+    function updateDeleteButtonState() {
+        const checkboxes = document.querySelectorAll(
+            ".row-checkbox:checked",
+        ) as NodeListOf<HTMLInputElement>;
+        if (checkboxes.length > 0) {
+            btnHapusMassal.disabled = false;
+            btnHapusMassal.classList.remove("cursor-not-allowed", "opacity-50");
+        } else {
+            btnHapusMassal.disabled = true;
+            btnHapusMassal.classList.add("cursor-not-allowed", "opacity-50");
+            if (checkAll) checkAll.checked = false;
+        }
+    }
+
+    btnHapusMassal?.addEventListener("click", async () => {
+        const checkboxes = document.querySelectorAll(
+            ".row-checkbox:checked",
+        ) as NodeListOf<HTMLInputElement>;
+        const ids = Array.from(checkboxes).map((cb) => parseInt(cb.value));
+
+        if (ids.length === 0) return;
+
+        if (
+            !confirm(
+                `Apakah Anda yakin ingin menghapus ${ids.length} topik yang dipilih?`,
+            )
+        )
+            return;
+
+        const originalHtml = btnHapusMassal.innerHTML;
+        btnHapusMassal.innerHTML = `<i class="icon-loader w-3.5 h-3.5 animate-spin"></i> Menghapus...`;
+        btnHapusMassal.disabled = true;
+
+        try {
+            const res = await fetch("/api/soal/topik", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids }),
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert("Gagal menghapus massal: " + data.error);
+                btnHapusMassal.innerHTML = originalHtml;
+                updateDeleteButtonState();
+                return;
+            }
+
+            if (checkAll) checkAll.checked = false;
+            btnHapusMassal.innerHTML = originalHtml;
+            updateDeleteButtonState();
+
+            loadTopics(currentPage);
+        } catch (e) {
+            alert("Terjadi kesalahan jaringan.");
+            btnHapusMassal.innerHTML = originalHtml;
+            updateDeleteButtonState();
+        }
+    });
+</script>

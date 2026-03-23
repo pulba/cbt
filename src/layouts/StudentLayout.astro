@@ -1,0 +1,92 @@
+---
+import "../styles/global.css";
+import "lucide-static/font/lucide.css";
+import { db } from "../db";
+import { configs } from "../db/schema";
+
+interface Props {
+    title: string;
+}
+
+const { title } = Astro.props;
+const user = Astro.locals.user;
+
+const currentPath = Astro.url.pathname;
+const isUjianCBT = currentPath.includes("/siswa/kerjakan");
+
+// Fetch system configs
+const allConfigs = await db.select().from(configs).all();
+const getConfig = (key: string) => allConfigs.find(c => c.key === key)?.value || "";
+const cbtNama = getConfig("cbt_nama") || "Computer Based Test";
+const schoolName = getConfig("school_name") || "CBT App";
+---
+
+<!doctype html>
+<html lang="id" class="h-full bg-surface-50">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <title>{title} | {cbtNama}</title>
+    </head>
+    <body class="h-full text-surface-800 flex flex-col font-sans">
+        {
+            !isUjianCBT && (
+                <header class="bg-primary-700 text-white shadow-md sticky top-0 z-40">
+                    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded bg-white/20 flex items-center justify-center font-bold">
+                                SAS
+                            </div>
+                            <span class="font-semibold tracking-wide hidden sm:block">
+                                {cbtNama}
+                            </span>
+                        </div>
+
+                        <div class="flex items-center gap-4">
+                            <div class="text-right hidden sm:block">
+                                <p class="text-sm font-medium">
+                                    {user?.username}
+                                </p>
+                                <p class="text-xs text-white/70">
+                                    Peserta Ujian
+                                </p>
+                            </div>
+                            <div class="w-9 h-9 rounded-full bg-white text-primary-700 flex items-center justify-center font-bold border-2 border-primary-400">
+                                {user?.username?.charAt(0).toUpperCase() || "S"}
+                            </div>
+                            <a
+                                href="/api/auth/logout"
+                                class="ml-2 text-white/50 hover:text-white transition"
+                                title="Keluar"
+                            >
+                                <i class="icon-log-out w-5 h-5" />
+                            </a>
+                        </div>
+                    </div>
+                </header>
+            )
+        }
+
+        <!-- Main Content Area centered constraint -->
+        <main
+            class={`flex-1 ${!isUjianCBT ? "max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8" : ""}`}
+        >
+            <slot />
+        </main>
+
+        {
+            !isUjianCBT && (
+                <footer class="bg-white border-t border-surface-200 py-6 mt-auto">
+                    <div class="max-w-5xl mx-auto px-4 text-center text-sm text-surface-500">
+                        &copy; {new Date().getFullYear()} {schoolName}. All rights
+                        reserved.
+                    </div>
+                </footer>
+            )
+        }
+    </body>
+</html>

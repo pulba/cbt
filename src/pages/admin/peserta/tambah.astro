@@ -1,0 +1,261 @@
+---
+import AdminLayout from "../../../layouts/AdminLayout.astro";
+import { db } from "../../../db";
+import { userGroups } from "../../../db/schema";
+import { eq } from "drizzle-orm";
+
+const allGroups = await db.select().from(userGroups);
+---
+
+<AdminLayout title="Tambah Peserta">
+    <div class="mb-6">
+        <nav class="flex text-sm text-surface-500 mb-2" aria-label="Breadcrumb">
+            <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                <li class="inline-flex items-center">
+                    <a
+                        href="/admin/peserta"
+                        class="hover:text-primary-600 transition-colors"
+                        >Peserta</a
+                    >
+                </li>
+                <li>
+                    <div class="flex items-center">
+                        <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                        <span class="text-surface-700 font-medium">Tambah</span>
+                    </div>
+                </li>
+            </ol>
+        </nav>
+        <h2 class="text-xl font-bold text-surface-800">Tambah Peserta Ujian</h2>
+    </div>
+
+    <div class="bg-white p-6 rounded-xl border border-surface-200 shadow-sm max-w-4xl">
+        {allGroups.length === 0 ? (
+            <div class="bg-warning/10 border border-warning/20 text-warning-700 p-4 rounded-lg flex items-start gap-3">
+                <i class="icon-alert-triangle w-5 h-5 flex-shrink-0 mt-0.5" />
+                <div>
+                    <h3 class="font-bold text-sm">Grup / Kelas Kosong</h3>
+                    <p class="text-sm mt-1">Anda belum memiliki grup sama sekali. Silakan buat Grup terlebih dahulu sebelum menambah peserta.</p>
+                    <a href="/admin/peserta/grup/tambah" class="inline-block mt-3 px-3 py-1.5 bg-warning text-white text-xs font-semibold rounded-md shadow-sm">
+                        Buat Grup Sekarang
+                    </a>
+                </div>
+            </div>
+        ) : (
+            <div>
+                <!-- Tabs -->
+                <div class="flex border-b border-surface-200 mb-6 font-medium text-sm">
+                    <button class="tab-btn active w-1/2 py-3 border-b-2 border-primary-600 text-primary-600 text-center transition" data-target="tab-manual">
+                        <i class="icon-user-plus w-4 h-4 inline-block mr-1"></i> Formulir Manual
+                    </button>
+                    <button class="tab-btn w-1/2 py-3 border-b-2 border-transparent text-surface-500 hover:text-surface-700 text-center transition" data-target="tab-generate">
+                        <i class="icon-zap w-4 h-4 inline-block mr-1"></i> Smart Generate (Massal)
+                    </button>
+                </div>
+
+                <!-- Tab Manual -->
+                <div id="tab-manual" class="tab-content block">
+                    <form id="form-tambah-peserta" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-surface-100 pb-4">
+                            <div>
+                                <label for="username" class="block text-sm font-medium text-surface-700 mb-1">Username / No. Peserta <span class="text-danger">*</span></label>
+                                <input type="text" id="username" name="username" required placeholder="Akan digunakan untuk login" class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"/>
+                            </div>
+                            <div>
+                                <label for="password" class="block text-sm font-medium text-surface-700 mb-1">Password <span class="text-danger">*</span></label>
+                                <input type="text" id="password" name="password" required placeholder="Password login siswa" class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"/>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="firstName" class="block text-sm font-medium text-surface-700 mb-1">Nama Lengkap <span class="text-danger">*</span></label>
+                                <input type="text" id="firstName" name="firstName" required placeholder="Nama Lengkap Siswa" class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"/>
+                            </div>
+                            <div>
+                                <label for="groupId" class="block text-sm font-medium text-surface-700 mb-1">Grup / Kelas <span class="text-danger">*</span></label>
+                                <select id="groupId" name="groupId" required class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500">
+                                    <option value="" disabled selected>-- Pilih Grup --</option>
+                                    {allGroups.map((g) => <option value={g.id}>{g.name}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 gap-4">
+                            <div>
+                                <label for="email" class="block text-sm font-medium text-surface-700 mb-1">Alamat Email (Opsional)</label>
+                                <input type="email" id="email" name="email" placeholder="Contoh: siswa@sekolah.com" class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"/>
+                            </div>
+                            <div>
+                                <label for="detail" class="block text-sm font-medium text-surface-700 mb-1">Keterangan / Detail (Opsional)</label>
+                                <textarea id="detail" name="detail" rows="2" placeholder="Detail kontak atau info lainnya" class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"/>
+                            </div>
+                        </div>
+
+                        <div class="pt-4 flex justify-end gap-3 border-t border-surface-100">
+                            <a href="/admin/peserta" class="px-5 py-2 text-surface-600 bg-surface-100 hover:bg-surface-200 font-medium rounded-lg transition">Batal</a>
+                            <button type="submit" id="btn-submit" class="px-5 py-2 text-white bg-primary-600 hover:bg-primary-500 font-medium rounded-lg transition flex items-center shadow-soft-xl shadow-primary-500/30">
+                                <i class="icon-save w-4 h-4 mr-2"></i> Simpan Manual
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Tab Generate -->
+                <div id="tab-generate" class="tab-content hidden">
+                    <form id="form-generate-peserta" class="space-y-4">
+                        <div class="bg-primary-50 border border-primary-100 p-4 rounded-lg mb-4 text-sm text-primary-800">
+                            <strong>Cara Kerja:</strong> Paste daftar nama siswa (1 nama per baris). Sistem akan otomatis membuatkan Username (No. Peserta) berurutan dan Password (5 angka acak) untuk setiap nama secara instan.
+                        </div>
+                        
+                        <div>
+                            <label for="generateGroupId" class="block text-sm font-medium text-surface-700 mb-1">Pilih Grup / Kelas Tujuan <span class="text-danger">*</span></label>
+                            <select id="generateGroupId" name="groupId" required class="w-full md:w-1/2 px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500">
+                                <option value="" disabled selected>-- Pilih Grup --</option>
+                                {allGroups.map((g) => <option value={g.id}>{g.name}</option>)}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="namesList" class="block text-sm font-medium text-surface-700 mb-1">Paste Daftar Nama Siswa <span class="text-danger">*</span></label>
+                            <textarea id="namesList" name="namesList" required rows="10" placeholder="Budi Santoso&#10;Andi Firmansyah&#10;Siti Aminah..." class="w-full px-4 py-3 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 font-mono" style="line-height: 1.5;"></textarea>
+                            <p class="text-[11px] text-surface-500 mt-1 flex justify-between">
+                                <span>Pisahkan tiap nama dengan Enter (Baris Baru). Baris kosong akan diabaikan.</span>
+                                <span>Total terdeteksi: <strong id="name-counter" class="text-primary-600">0</strong> nama</span>
+                            </p>
+                        </div>
+
+                        <div class="pt-4 flex justify-end gap-3 border-t border-surface-100">
+                            <a href="/admin/peserta" class="px-5 py-2 text-surface-600 bg-surface-100 hover:bg-surface-200 font-medium rounded-lg transition">Batal</a>
+                            <button type="submit" id="btn-generate-submit" class="px-5 py-2 text-white bg-primary-600 hover:bg-primary-500 font-medium rounded-lg transition flex items-center shadow-soft-xl shadow-primary-500/30">
+                                <i class="icon-zap w-4 h-4 mr-2"></i> Auto-Generate Sekarang
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        )}
+    </div>
+</AdminLayout>
+
+<script>
+    // Tab Switching Logic
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            // Remove active style from all
+            tabBtns.forEach(b => {
+                b.classList.remove('border-primary-600', 'text-primary-600');
+                b.classList.add('border-transparent', 'text-surface-500');
+            });
+            // Hide all content
+            tabContents.forEach(c => c.classList.add('hidden'));
+
+            // Add active style to clicked
+            btn.classList.add('border-primary-600', 'text-primary-600');
+            btn.classList.remove('border-transparent', 'text-surface-500');
+            
+            // Show target content
+            const targetId = btn.getAttribute('data-target');
+            if(targetId) document.getElementById(targetId)?.classList.remove('hidden');
+        });
+    });
+
+    // Form Manual Submission
+    const formManual = document.getElementById("form-tambah-peserta") as HTMLFormElement;
+    const btnSubmitManual = document.getElementById("btn-submit") as HTMLButtonElement;
+
+    formManual?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(formManual);
+        const data = Object.fromEntries(formData.entries());
+
+        const originalText = btnSubmitManual.innerHTML;
+        btnSubmitManual.innerHTML = `<i class="icon-loader w-4 h-4 mr-2 animate-spin"></i> Menyimpan...`;
+        btnSubmitManual.disabled = true;
+
+        try {
+            const res = await fetch("/api/peserta", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+            });
+            const result = await res.json();
+
+            if (!result.success) {
+                alert("Gagal menambahkan peserta: " + result.error);
+                btnSubmitManual.innerHTML = originalText;
+                btnSubmitManual.disabled = false;
+                return;
+            }
+
+            window.location.href = "/admin/peserta";
+        } catch (error) {
+            alert("Terjadi kesalahan jaringan.");
+            btnSubmitManual.innerHTML = originalText;
+            btnSubmitManual.disabled = false;
+        }
+    });
+
+    // Counter for names
+    const namesListInput = document.getElementById("namesList") as HTMLTextAreaElement;
+    const nameCounter = document.getElementById("name-counter");
+
+    namesListInput?.addEventListener("input", () => {
+        if(!nameCounter) return;
+        const text = namesListInput.value;
+        const count = text.split('\n').filter(line => line.trim().length > 0).length;
+        nameCounter.textContent = count.toString();
+    });
+
+    // Form Generate Submission
+    const formGenerate = document.getElementById("form-generate-peserta") as HTMLFormElement;
+    const btnSubmitGenerate = document.getElementById("btn-generate-submit") as HTMLButtonElement;
+
+    formGenerate?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        
+        const groupId = (document.getElementById("generateGroupId") as HTMLSelectElement).value;
+        const namesText = namesListInput.value;
+        const namesArray = namesText.split('\n').filter(line => line.trim().length > 0).map(line => line.trim());
+
+        if(namesArray.length === 0) {
+            alert("Daftar nama masih kosong!");
+            return;
+        }
+
+        if(!confirm(`Anda akan di-generate profil ${namesArray.length} siswa baru ke grup tersebut. Lanjutkan?`)) return;
+
+        const originalText = btnSubmitGenerate.innerHTML;
+        btnSubmitGenerate.innerHTML = `<i class="icon-loader w-4 h-4 mr-2 animate-spin"></i> Generating ${namesArray.length} Profil...`;
+        btnSubmitGenerate.disabled = true;
+
+        try {
+            const res = await fetch("/api/peserta/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    groupId: groupId,
+                    names: namesArray
+                }),
+            });
+            const result = await res.json();
+
+            if (!result.success) {
+                alert("Gagal melakukan generate: " + result.error);
+                btnSubmitGenerate.innerHTML = originalText;
+                btnSubmitGenerate.disabled = false;
+                return;
+            }
+
+            alert(`Sukses! ${result.count} peserta berhasil ditambahkan.`);
+            window.location.href = "/admin/peserta";
+        } catch (error) {
+            alert("Terjadi kesalahan jaringan saat generate.");
+            btnSubmitGenerate.innerHTML = originalText;
+            btnSubmitGenerate.disabled = false;
+        }
+    });
+</script>

@@ -1,0 +1,277 @@
+---
+import AdminLayout from "../../../layouts/AdminLayout.astro";
+import { db } from "../../../db";
+import { configs } from "../../../db/schema";
+
+const user = Astro.locals.user;
+if (!user || user.role !== "admin") return Astro.redirect("/admin");
+
+// Fetch current configs
+const allConfigs = await db.select().from(configs).all();
+
+const getConfig = (key: string) =>
+    allConfigs.find((c) => c.key === key)?.value || "";
+
+const schoolName = getConfig("school_name");
+const cbtNama = getConfig("cbt_nama");
+const mobileLock = getConfig("cbt_mobile_lock_xambro") === "true";
+const multiLogin = getConfig("proteksi_multilogin") === "true";
+const informasi = getConfig("cbt_informasi");
+---
+
+<AdminLayout title="Pengaturan Sistem">
+    <div class="mb-6">
+        <h2 class="text-xl font-bold text-surface-800">Pengaturan Sistem</h2>
+        <p class="text-sm text-surface-500 mt-1">
+            Kelola identitas aplikasi dan konfigurasi keamanan global.
+        </p>
+    </div>
+
+    <div class="max-w-4xl">
+        <form id="settingsForm" class="space-y-6">
+            <!-- Identitas Sekolah -->
+            <div
+                class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden"
+            >
+                <div
+                    class="px-6 py-4 border-b border-surface-100 bg-surface-50/50"
+                >
+                    <h3
+                        class="font-bold text-surface-800 flex items-center gap-2"
+                    >
+                        <i class="icon-home w-4 h-4 text-primary-600"></i>
+                        Identitas Sekolah & Aplikasi
+                    </h3>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label
+                                class="block text-sm font-semibold text-surface-700 mb-1.5"
+                                >Nama Sekolah</label
+                            >
+                            <input
+                                type="text"
+                                name="school_name"
+                                value={schoolName}
+                                placeholder="Contoh: SMK Negeri 1 Jakarta"
+                                class="w-full px-4 py-2.5 bg-surface-50 border border-surface-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
+                            />
+                        </div>
+                        <div>
+                            <label
+                                class="block text-sm font-semibold text-surface-700 mb-1.5"
+                                >Judul Aplikasi (Dashboard)</label
+                            >
+                            <input
+                                type="text"
+                                name="cbt_nama"
+                                value={cbtNama}
+                                placeholder="Contoh: SAS CBT 2025"
+                                class="w-full px-4 py-2.5 bg-surface-50 border border-surface-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Keamanan & Fitur -->
+            <div
+                class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden"
+            >
+                <div
+                    class="px-6 py-4 border-b border-surface-100 bg-surface-50/50"
+                >
+                    <h3
+                        class="font-bold text-surface-800 flex items-center gap-2"
+                    >
+                        <i class="icon-shield w-4 h-4 text-rose-600"></i>
+                        Keamanan & Pembatasan
+                    </h3>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div
+                        class="flex items-center justify-between p-4 bg-rose-50/30 border border-rose-100 rounded-xl"
+                    >
+                        <div>
+                            <p class="text-sm font-bold text-surface-800">
+                                Kunci Browser (Xambro/SEB)
+                            </p>
+                            <p class="text-xs text-surface-500 mt-0.5">
+                                Wajibkan siswa menggunakan browser khusus agar
+                                tidak bisa membuka aplikasi lain.
+                            </p>
+                        </div>
+                        <label
+                            class="relative inline-flex items-center cursor-pointer"
+                        >
+                            <input
+                                type="checkbox"
+                                name="cbt_mobile_lock_xambro"
+                                class="sr-only peer"
+                                checked={mobileLock}
+                            />
+                            <div
+                                class="w-11 h-6 bg-surface-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
+                            >
+                            </div>
+                        </label>
+                    </div>
+
+                    <div
+                        class="flex items-center justify-between p-4 bg-amber-50/30 border border-amber-100 rounded-xl"
+                    >
+                        <div>
+                            <p class="text-sm font-bold text-surface-800">
+                                Proteksi Multi-login
+                            </p>
+                            <p class="text-xs text-surface-500 mt-0.5">
+                                Cegah satu akun digunakan oleh banyak perangkat
+                                secara bersamaan.
+                            </p>
+                        </div>
+                        <label
+                            class="relative inline-flex items-center cursor-pointer"
+                        >
+                            <input
+                                type="checkbox"
+                                name="proteksi_multilogin"
+                                class="sr-only peer"
+                                checked={multiLogin}
+                            />
+                            <div
+                                class="w-11 h-6 bg-surface-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
+                            >
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Informasi/Pengumuman -->
+            <div
+                class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden"
+            >
+                <div
+                    class="px-6 py-4 border-b border-surface-100 bg-surface-50/50"
+                >
+                    <h3
+                        class="font-bold text-surface-800 flex items-center gap-2"
+                    >
+                        <i class="icon-info w-4 h-4 text-emerald-600"></i>
+                        Informasi Dashboard Siswa
+                    </h3>
+                </div>
+                <div class="p-6">
+                    <label
+                        class="block text-sm font-semibold text-surface-700 mb-1.5"
+                        >Papan Pengumuman</label
+                    >
+                    <textarea
+                        name="cbt_informasi"
+                        rows="4"
+                        class="w-full px-4 py-2.5 bg-surface-50 border border-surface-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all font-mono"
+                        placeholder="Tulis informasi atau instruksi di sini. Mendukung HTML dasar..."
+                        >{informasi}</textarea
+                    >
+                </div>
+            </div>
+
+            <!-- Page Actions -->
+            <!-- Page Actions -->
+            <div
+                class="pt-10 mt-10 border-t border-surface-200 flex flex-col sm:flex-row items-center justify-end gap-4 pb-28"
+            >
+                <button
+                    type="button"
+                    onclick="window.history.back()"
+                    class="w-full sm:w-auto h-12 px-8 flex items-center justify-center gap-2 bg-white hover:bg-surface-50 active:scale-[0.98] text-surface-600 font-bold rounded-xl border border-surface-200 transition-all duration-200 group"
+                >
+                    <i
+                        class="icon-arrow-left w-5 h-5 group-hover:-translate-x-1 transition-transform"
+                    ></i>
+                    <span>Batal</span>
+                </button>
+                <button
+                    type="submit"
+                    id="saveBtn"
+                    class="w-full sm:w-auto h-12 px-8 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-700 active:scale-[0.98] text-white font-bold rounded-xl shadow-lg shadow-primary-600/20 transition-all duration-200 relative overflow-hidden"
+                >
+                    <i class="icon-save w-5 h-5 relative z-10 transition-transform group-hover:scale-110"></i>
+                    <span class="whitespace-nowrap relative z-10">Simpan Perubahan</span>
+                    <div class="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 -translate-x-full hover:animate-shimmer"></div>
+                </button>
+            </div>
+        </form>
+    </div>
+</AdminLayout>
+
+<style>
+    /* Premium Hover Effect */
+    #saveBtn {
+        transition:
+            transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+            box-shadow 0.2s;
+    }
+    #saveBtn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 15px 25px -5px rgba(37, 99, 235, 0.3);
+    }
+    #saveBtn:active {
+        transform: translateY(0);
+    }
+</style>
+
+<script>
+    const form = document.getElementById("settingsForm") as HTMLFormElement;
+    const saveBtn = document.getElementById("saveBtn") as HTMLButtonElement;
+
+    form?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = "Menyimpan...";
+
+        const formData = new FormData(form);
+        const data: Record<string, any> = {};
+
+        // Handle all inputs
+        formData.forEach((value, key) => {
+            data[key] = value;
+        });
+
+        // Special handling for checkboxes because FormData only includes them if checked
+        data["cbt_mobile_lock_xambro"] = (
+            form.querySelector(
+                '[name="cbt_mobile_lock_xambro"]',
+            ) as HTMLInputElement
+        ).checked;
+        data["proteksi_multilogin"] = (
+            form.querySelector(
+                '[name="proteksi_multilogin"]',
+            ) as HTMLInputElement
+        ).checked;
+
+        try {
+            const res = await fetch("/api/admin/pengaturan", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+            });
+
+            const result = await res.json();
+            if (result.success) {
+                alert("Pengaturan berhasil disimpan!");
+                window.location.reload();
+            } else {
+                alert("Gagal menyimpan: " + result.error);
+            }
+        } catch (err) {
+            alert("Terjadi kesalahan jaringan.");
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML =
+                '<i class="icon-save w-5 h-5"></i> <span class="whitespace-nowrap">Simpan Perubahan</span>';
+        }
+    });
+</script>

@@ -1,0 +1,47 @@
+Rincian Fitur Aplikasi CBT SAS2025
+Berdasarkan analisis pada struktur database dan file pengontrol (controllers) aplikasi, berikut adalah rincian lengkap fitur-fitur yang disediakan oleh web/aplikasi ujian ini. Aplikasi ini memiliki dua portal utama: Admin/Guru (Manajer) dan Siswa (Peserta).
+
+1. Portal Admin / Guru (Manajemen Ujian)
+Bagian ini digunakan untuk mengelola seluruh operasional ujian, mulai dari bank soal hingga pelaporan nilai.
+
+A. Manajemen Bank Soal (Modul)
+Topik/Mata Pelajaran: Mengelola daftar mata pelajaran atau topik ujian (Modul_topik.php).
+Bank Soal: Membuat, mengedit, dan menghapus soal (Modul_soal.php, Modul_daftar.php).
+Pilihan Ganda & Essai: Dukungan untuk jenis soal multiple choice dan essai/uraian.
+Kunci Jawaban: Mengelola pilihan jawaban dan kunci yang benar (Modul_jawaban.php).
+Import Soal: Memasukkan soal secara massal menggunakan format Excel atau Word (Modul_import.php, Modul_import_word.php, Word.php).
+Export/Import Bank Soal: Memindahkan bank soal antar server atau membackup soal (Tool_exportimport_soal.php).
+File Manager: Mengelola file media (gambar, audio) yang disisipkan di dalam soal (Modul_filemanager.php).
+B. Manajemen Nilai & Laporan (Hasil)
+Daftar Hasil Ujian: Melihat nilai mentah siswa secara langsung (Tes_hasil.php).
+Detail Hasil Siswa: Melihat rincian jawaban siswa, mana yang benar dan salah (Tes_hasil_detail.php).
+Evaluasi Soal Essai: Memberikan nilai manual pada soal berbentuk uraian/essai (Tes_evaluasi.php).
+Rekap Hasil: Mengunduh atau mencetak rekapitulasi nilai seluruh siswa (Laporan_rekap_hasil.php).
+Analisis Butir Soal: Melihat tingkat kesulitan dan daya beda soal berdasarkan statistik jawaban siswa (Laporan_analisis_butir_soal.php).
+C. Manajemen Peserta (Siswa)
+Daftar Peserta: Mengelola data siswa yang akan mengikuti ujian (Peserta_daftar.php).
+Grup/Kelas: Mengelompokkan siswa berdasarkan kelas atau jurusan (Peserta_group.php).
+Import Peserta: Menambahkan siswa massal menggunakan file Excel (Peserta_import.php).
+Cetak Kartu Ujian: Membuat dan mencetak kartu login ujian untuk peserta (Peserta_kartu.php).
+Reset Login: Mereset sesi ujian siswa jika terjadi masalah komputernya mati atau gagal login (Peserta_reset.php).
+D. Manajemen Ujian (Tes)
+Buat/Edit Ujian: Mengatur jadwal ujian, durasi waktu, pengacakan soal, dan pengacakan opsi jawaban (Tes_tambah.php, Tes_daftar.php).
+Distribusi Token: Mengeluarkan kode token dinamis yang wajib dimasukkan siswa sebelum memulai ujian (Tes_token.php).
+E. Pengaturan Sistem & Pengguna
+Manajemen Pengguna (Admin/Guru): Mengelola akun para guru dan operator (Useratur.php).
+Hak Akses (Level): Menentukan akses menu berdasarkan peran (misal: Admin, Guru Mapel) (Userlevel.php, Usermenu.php).
+Pengaturan Aplikasi: Mengatur nama sekolah, logo, dan identitas aplikasi (Pengaturan_zyacbt.php).
+Backup Database: Mencadangkan data sistem secara utuh (Tool_backup.php).
+Log Aktivitas: Merekam rekam jejak aktivitas admin di dalam sistem.
+2. Portal Siswa (Peserta Ujian)
+Bagian antarmuka yang digunakan langsung oleh siswa untuk mengerjakan ujian.
+
+Login Siswa: Siswa login menggunakan kombinasi Username dan Password dari kartu ujian.
+Dashboard Ujian: Melihat daftar ujian yang sedang aktif dan bisa diikuti (Tes_dashboard.php).
+Sistem Token: Harus memasukkan Token yang diberikan pengawas agar bisa mulai mengerjakan.
+Tampilan Ujian CBT: Antarmuka pengerjaan ujian interaktif (Tes_kerjakan.php) meliputi:
+Waktu hitung mundur (countdown timer).
+Navigasi nomor soal.
+Penanda soal (Ragu-ragu).
+Soal dan jawaban yang otomatis teracak (Sesuai konfigurasi admin).
+Hasil Ujian Selesai: Siswa dapat melihat detail nilai langsung setelah selesai mengerjakan ujian (jika fitur ini diaktifkan oleh admin) (Tes_hasil_detail.php).

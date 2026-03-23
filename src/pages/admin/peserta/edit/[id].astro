@@ -1,0 +1,232 @@
+---
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { db } from "../../../../db";
+import { users, userGroups } from "../../../../db/schema";
+import { eq } from "drizzle-orm";
+
+const { id } = Astro.params;
+
+if (!id) {
+    return Astro.redirect("/admin/peserta");
+}
+
+const pesertaItem = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, parseInt(id)))
+    .get();
+
+if (!pesertaItem) {
+    return Astro.redirect("/admin/peserta");
+}
+
+const allGroups = await db.select().from(userGroups);
+---
+
+<AdminLayout title="Ubah Peserta">
+    <div class="mb-6">
+        <nav class="flex text-sm text-surface-500 mb-2" aria-label="Breadcrumb">
+            <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                <li class="inline-flex items-center">
+                    <a
+                        href="/admin/peserta"
+                        class="hover:text-primary-600 transition-colors"
+                        >Peserta</a
+                    >
+                </li>
+                <li>
+                    <div class="flex items-center">
+                        <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                        <span class="text-surface-700 font-medium">Ubah</span>
+                    </div>
+                </li>
+            </ol>
+        </nav>
+        <h2 class="text-xl font-bold text-surface-800">Ubah Profil Peserta</h2>
+    </div>
+
+    <div
+        class="bg-white p-6 rounded-xl border border-surface-200 shadow-sm max-w-3xl"
+    >
+        <form id="form-ubah-peserta" class="space-y-4">
+            <input type="hidden" name="id" value={pesertaItem.id} />
+            <div
+                class="grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-surface-100 pb-4"
+            >
+                <div>
+                    <label
+                        for="username"
+                        class="block text-sm font-medium text-surface-700 mb-1"
+                        >Username / No. Peserta <span class="text-danger"
+                            >*</span
+                        ></label
+                    >
+                    <input
+                        type="text"
+                        id="username"
+                        name="username"
+                        required
+                        value={pesertaItem.username}
+                        class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                    />
+                </div>
+                <div>
+                    <label
+                        for="password"
+                        class="block text-sm font-medium text-surface-700 mb-1"
+                        >Password Baru (Opsional)</label
+                    >
+                    <input
+                        type="text"
+                        id="password"
+                        name="password"
+                        placeholder="Kosongkan jika tidak ingin merubah"
+                        class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                    />
+                    <p class="text-[10px] text-surface-500 mt-1">
+                        Isi password baru hanya jika Anda ingin mereset password
+                        pengguna.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label
+                        for="firstName"
+                        class="block text-sm font-medium text-surface-700 mb-1"
+                        >Nama Lengkap <span class="text-danger">*</span></label
+                    >
+                    <input
+                        type="text"
+                        id="firstName"
+                        name="firstName"
+                        required
+                        value={pesertaItem.firstName}
+                        class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                    />
+                </div>
+                <div>
+                    <label
+                        for="groupId"
+                        class="block text-sm font-medium text-surface-700 mb-1"
+                        >Grup / Kelas <span class="text-danger">*</span></label
+                    >
+                    <select
+                        id="groupId"
+                        name="groupId"
+                        required
+                        class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                    >
+                        {
+                            allGroups.map((g) => (
+                                <option
+                                    value={g.id}
+                                    selected={g.id === pesertaItem.groupId}
+                                >
+                                    {g.name}
+                                </option>
+                            ))
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label
+                        for="email"
+                        class="block text-sm font-medium text-surface-700 mb-1"
+                        >Alamat Email (Opsional)</label
+                    >
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        value={pesertaItem.email || ""}
+                        class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                    />
+                </div>
+
+                <div>
+                    <label
+                        for="detail"
+                        class="block text-sm font-medium text-surface-700 mb-1"
+                        >Keterangan / Detail (Opsional)</label
+                    >
+                    <textarea
+                        id="detail"
+                        name="detail"
+                        rows="2"
+                        class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                        >{pesertaItem.detail || ""}</textarea
+                    >
+                </div>
+            </div>
+
+            <div
+                class="pt-4 flex justify-end gap-3 border-t border-surface-100"
+            >
+                <a
+                    href="/admin/peserta"
+                    class="px-5 py-2 text-surface-600 bg-surface-100 hover:bg-surface-200 font-medium rounded-lg transition"
+                >
+                    Batal
+                </a>
+                <button
+                    type="submit"
+                    id="btn-submit"
+                    class="px-5 py-2 text-white bg-primary-600 hover:bg-primary-500 font-medium rounded-lg transition flex items-center shadow-soft-xl shadow-primary-500/30"
+                >
+                    <i class="icon-save w-4 h-4 mr-2"></i> Simpan Perubahan
+                </button>
+            </div>
+        </form>
+    </div>
+</AdminLayout>
+
+<script>
+    const form = document.getElementById(
+        "form-ubah-peserta",
+    ) as HTMLFormElement;
+    const btnSubmit = document.getElementById(
+        "btn-submit",
+    ) as HTMLButtonElement;
+
+    form?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const data: any = Object.fromEntries(formData.entries());
+
+        // Jika password diisi string kosong, jangan sertakan di payload (agar tidak overwrite dengan blank)
+        if (data.password && data.password.trim() === "") {
+            delete data.password;
+        }
+
+        const originalText = btnSubmit.innerHTML;
+        btnSubmit.innerHTML = `<i class="icon-loader w-4 h-4 mr-2 animate-spin"></i> Menyimpan...`;
+        btnSubmit.disabled = true;
+
+        try {
+            const res = await fetch("/api/peserta", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+            });
+            const result = await res.json();
+
+            if (!result.success) {
+                alert("Gagal mengubah peserta: " + result.error);
+                btnSubmit.innerHTML = originalText;
+                btnSubmit.disabled = false;
+                return;
+            }
+
+            window.location.href = "/admin/peserta";
+        } catch (error) {
+            alert("Terjadi kesalahan jaringan.");
+            btnSubmit.innerHTML = originalText;
+            btnSubmit.disabled = false;
+        }
+    });
+</script>

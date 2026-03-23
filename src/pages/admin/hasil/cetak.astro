@@ -1,0 +1,304 @@
+---
+import { db } from "../../../db";
+import {
+    tests,
+    testUsers,
+    testQuestions,
+    testQuestionAnswers,
+    questionAnswers,
+    users,
+    userGroups,
+} from "../../../db/schema";
+import { eq, and, desc } from "drizzle-orm";
+
+const admin = Astro.locals.user;
+if (!admin || admin.role === "student") return Astro.redirect("/admin");
+
+const testIdStr = Astro.url.searchParams.get("testId");
+if (!testIdStr) return Astro.redirect("/admin/hasil");
+
+const testId = parseInt(testIdStr);
+
+// 1. Get test config
+const test = await db.select().from(tests).where(eq(tests.id, testId)).get();
+if (!test) return Astro.redirect("/admin/hasil");
+
+// 2. Get all sessions
+const sessions = await db
+    .select({
+        sessionId: testUsers.id,
+        userId: testUsers.userId,
+        creationTime: testUsers.creationTime,
+        firstName: users.firstName,
+        username: users.username,
+        groupName: userGroups.name,
+    })
+    .from(testUsers)
+    .innerJoin(users, eq(testUsers.userId, users.id))
+    .leftJoin(userGroups, eq(users.groupId, userGroups.id))
+    .where(eq(testUsers.testId, testId))
+    .orderBy(userGroups.name, users.firstName)
+    .all();
+
+// 3. Scoring
+const allSessionQuestions = await db
+    .select({
+        sessionId: testQuestions.testUserId,
+        qId: testQuestions.id,
+    })
+    .from(testQuestions)
+    .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
+    .where(eq(testUsers.testId, testId))
+    .all();
+
+const allSessionSelected = await db
+    .select({
+        sessionId: testQuestions.testUserId,
+        isCorrect: questionAnswers.isCorrect,
+    })
+    .from(testQuestionAnswers)
+    .innerJoin(
+        testQuestions,
+        eq(testQuestionAnswers.testQuestionId, testQuestions.id),
+    )
+    .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
+    .innerJoin(
+        questionAnswers,
+        eq(testQuestionAnswers.answerId, questionAnswers.id),
+    )
+    .where(
+        and(
+            eq(testUsers.testId, testId),
+            eq(testQuestionAnswers.isSelected, true),
+        ),
+    )
+    .all();
+
+const scoreRight = test.scoreRight ?? 1;
+const scoreWrong = test.scoreWrong ?? 0;
+const scoreUnanswered = test.scoreUnanswered ?? 0;
+const maxScore = test.maxScore ?? 0;
+
+// 3.5 Group by latest session per user
+const latestMap = new Map<number, any>();
+sessions.forEach(sess => {
+    const existing = latestMap.get(sess.userId!);
+    if (!existing || sess.sessionId > existing.sessionId) {
+        latestMap.set(sess.userId!, sess);
+    }
+});
+const filteredSessList = Array.from(latestMap.values());
+
+const results = filteredSessList.map((sess, idx) => {
+    const sessionQs = allSessionQuestions.filter(
+        (q) => q.sessionId === sess.sessionId,
+    );
+    const sessionSelected = allSessionSelected.filter(
+        (s) => s.sessionId === sess.sessionId,
+    );
+
+    const total = sessionQs.length;
+    const correct = sessionSelected.filter((s) => s.isCorrect).length;
+    const answered = sessionSelected.length;
+    const wrong = answered - correct;
+    const unanswered = total - answered;
+
+    const pgScore =
+        correct * scoreRight +
+        wrong * scoreWrong +
+        unanswered * scoreUnanswered;
+    const maxScoreScale = maxScore > 0 ? maxScore : 100;
+    const maxRaw = total * scoreRight;
+    const totalScore = maxRaw > 0 ? (pgScore / maxRaw) * maxScoreScale : 0;
+
+    return {
+        ...sess,
+        totalScore,
+        status: (sessions.find(s => s.sessionId === sess.sessionId) as any).status,
+        formattedDate: sess.creationTime
+            ? new Date(sess.creationTime)
+                  .toISOString()
+                  .replace("T", " ")
+                  .substring(0, 19)
+            : "-",
+    };
+});
+---
+
+<!doctype html>
+<html lang="id">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Cetak Hasil: {test.name}</title>
+        <style>
+            body {
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                font-size: 10px;
+                color: #000;
+                margin: 0;
+                padding: 0;
+                background: #f4f4f4;
+            }
+            .page-container {
+                background: white;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 20px auto;
+                padding: 15mm;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                box-sizing: border-box;
+            }
+            .header {
+                text-align: center;
+                margin-bottom: 30px;
+                border-bottom: 2px solid #333;
+                padding-bottom: 15px;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 20px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .header p {
+                margin: 5px 0 0;
+                color: #555;
+                font-size: 12px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }
+            th,
+            td {
+                border: 1px solid #000;
+                padding: 8px 6px;
+                text-align: left;
+                line-height: 1.4;
+            }
+            th {
+                background-color: #f0f0f0 !important;
+                text-transform: uppercase;
+                font-weight: bold;
+                -webkit-print-color-adjust: exact;
+            }
+            .text-center {
+                text-align: center;
+            }
+            .text-right {
+                text-align: right;
+            }
+            .text-bold {
+                font-weight: bold;
+            }
+            @media print {
+                @page {
+                    size: A4 portrait;
+                    margin: 0;
+                }
+                body {
+                    background: white;
+                    padding: 0;
+                }
+                .page-container {
+                    margin: 0;
+                    width: 100%;
+                    box-shadow: none;
+                    padding: 15mm;
+                }
+                .no-print {
+                    display: none;
+                }
+            }
+            .btn-print {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 12px 24px;
+                background: #2563eb;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+                font-weight: 600;
+                font-size: 14px;
+                z-index: 100;
+                display: flex;
+                items-center: center;
+                gap: 8px;
+            }
+            .btn-print:hover {
+                background: #1d4ed8;
+            }
+        </style>
+    </head>
+    <body>
+        <button onclick="window.print()" class="btn-print no-print">
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path d="M6 9V2h12v7"></path><path
+                    d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
+                ></path><rect x="6" y="14" width="12" height="8"></rect></svg
+            >
+            Cetak Laporan (PDF)
+        </button>
+
+        <div class="page-container">
+            <div class="header">
+                <h1>Laporan Hasil Ujian & Nilai</h1>
+                <p>
+                    Ujian: <strong>{test.name}</strong> | Tanggal Cetak: {
+                        new Date().toLocaleString("id-ID", {
+                            dateStyle: "full",
+                            timeStyle: "short",
+                        })
+                    }
+                </p>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 40px;">No</th>
+                        <th>Nama</th>
+                        <th style="width: 100px;">Username</th>
+                        <th style="width: 80px;">Status</th>
+                        <th>Nama Tes</th>
+                        <th style="width: 120px;">Group</th>
+                        <th style="width: 80px;">Nilai</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {
+                        results.map((r, idx) => (
+                            <tr>
+                                <td>{idx + 1}</td>
+                                <td class="text-bold">{r.firstName}</td>
+                                <td class="font-mono">{r.username}</td>
+                                <td class="text-center">
+                                    {r.status === 4 ? "Selesai" : r.status === 5 ? "Arsip" : "Aktif"}
+                                </td>
+                                <td>{test.name}</td>
+                                <td>{r.groupName || "-"}</td>
+                                <td class="text-bold">
+                                    {r.totalScore.toFixed(2).replace(".", ",")}
+                                </td>
+                            </tr>
+                        ))
+                    }
+                </tbody>
+            </table>
+        </div>
+    </body>
+</html>

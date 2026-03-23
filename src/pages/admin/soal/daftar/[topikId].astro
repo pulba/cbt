@@ -1,0 +1,177 @@
+---
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { db } from "../../../../db";
+import { topics, questions } from "../../../../db/schema";
+import { eq, desc } from "drizzle-orm";
+
+const { topikId: idParam } = Astro.params;
+
+if (!idParam) {
+    return Astro.redirect("/admin/soal/topik");
+}
+
+const topicId = parseInt(idParam);
+const topic = await db.select().from(topics).where(eq(topics.id, topicId)).get();
+
+if (!topic) {
+    return Astro.redirect("/admin/soal/topik");
+}
+
+const allQuestions = await db
+    .select()
+    .from(questions)
+    .where(eq(questions.topicId, topicId))
+    .orderBy(desc(questions.id))
+    .all();
+---
+
+<AdminLayout title={`Daftar Soal: ${topic.name}`}>
+    <div class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div>
+            <nav class="flex text-sm text-surface-500 mb-2" aria-label="Breadcrumb">
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a href="/admin/soal/topik" class="hover:text-primary-600 transition-colors">Topik</a>
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium line-clamp-1">{topic.name}</span>
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800 flex items-center">
+                <a href="/admin/soal/topik" class="mr-3 p-1.5 rounded-lg hover:bg-surface-100 transition-colors text-surface-500 hover:text-surface-700">
+                    <i class="icon-arrow-left w-5 h-5"></i>
+                </a>
+                Daftar Soal
+            </h2>
+            <p class="text-sm text-surface-500 mt-1 ml-10">
+                Kelola pertanyaan untuk topik <strong class="text-surface-700">{topic.name}</strong>.
+            </p>
+        </div>
+        <div class="flex gap-2">
+            <a
+                href={`/admin/soal/import?topicId=${topic.id}`}
+                class="px-4 py-2 bg-white border border-surface-200 text-surface-700 text-sm font-medium rounded-lg hover:bg-surface-50 transition shadow-sm"
+            >
+                <i class="icon-upload w-4 h-4 inline-block mr-1"></i> Import Soal
+            </a>
+            <a
+                href={`/admin/soal/tambah/${topic.id}`}
+                class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30"
+            >
+                <i class="icon-plus w-4 h-4 inline-block mr-1"></i> Buat Soal
+            </a>
+        </div>
+    </div>
+
+    <!-- Stats & Filters -->
+    <div class="bg-white p-4 rounded-xl border border-surface-200 shadow-sm mb-6 flex flex-wrap gap-4 items-center justify-between">
+        <h3 class="font-semibold text-surface-800">Daftar Bank Soal</h3>
+        <div class="flex items-center gap-3">
+            <div class="text-sm border border-surface-200 bg-surface-50 rounded-lg px-3 py-2 text-surface-600 font-medium">
+                Total: <span class="text-primary-600 font-bold">{allQuestions.length}</span> Soal
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Table Container -->
+    <div class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden" id="soal-container">
+        <table class="w-full text-left text-sm text-surface-600">
+            <thead class="bg-surface-50 border-b border-surface-200 text-surface-700 font-semibold">
+                <tr>
+                    <th class="px-5 py-4 w-16 text-center">Nomor</th>
+                    <th class="px-5 py-4">Pertanyaan</th>
+                    <th class="px-5 py-4 w-48 hidden sm:table-cell">Mata Pelajaran</th>
+                    <th class="px-5 py-4 w-32 text-center">Jenis</th>
+                    <th class="px-5 py-4 w-36 text-center">Aksi</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-surface-100">
+                {allQuestions.length === 0 ? (
+                    <tr>
+                        <td colspan="5" class="px-5 py-12 text-center text-surface-500">
+                            <div class="w-16 h-16 bg-surface-100 rounded-full flex items-center justify-center mx-auto mb-3 text-surface-400">
+                                <i class="icon-inbox w-8 h-8"></i>
+                            </div>
+                            <p class="font-medium text-surface-700 mb-1">Belum ada soal</p>
+                            <p class="text-sm">Silakan buat soal baru atau import dari Excel.</p>
+                        </td>
+                    </tr>
+                ) : (
+                    allQuestions.map((soal, idx) => (
+                        <tr class="hover:bg-surface-50/50 transition-colors">
+                            <td class="px-5 py-4 text-center text-surface-400 font-medium">{idx + 1}</td>
+                            <td class="px-5 py-4">
+                                <div class="font-medium text-surface-800 line-clamp-3 prose prose-sm max-w-none prose-p:my-0 prose-img:max-h-12 prose-img:inline" set:html={soal.text}></div>
+                                {soal.audio && (
+                                    <div class="mt-2 flex items-center text-xs text-info bg-info/10 px-2 py-1 rounded w-fit">
+                                        <i class="icon-volume-2 w-3.5 h-3.5 mr-1"></i> Termasuk Audio
+                                    </div>
+                                )}
+                            </td>
+                            <td class="px-5 py-4 font-medium text-surface-700 hidden sm:table-cell">
+                                <span class="truncate block max-w-[150px]" title={topic.name}>{topic.name}</span>
+                            </td>
+                            <td class="px-5 py-4 text-center">
+                                {soal.type === 1 ? (
+                                    <span class="px-2.5 py-1 bg-primary-50 border border-primary-100 text-primary-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Ganda</span>
+                                ) : soal.type === 2 ? (
+                                    <span class="px-2.5 py-1 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Esai</span>
+                                ) : (
+                                    <span class="px-2.5 py-1 bg-amber-50 border border-amber-100 text-amber-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Singkat</span>
+                                )}
+                            </td>
+                            <td class="px-5 py-4 text-center">
+                                <div class="flex items-center justify-center gap-1.5">
+                                    {soal.type === 1 && (
+                                        <a href={`/admin/soal/jawaban/${soal.id}`} title="Kelola Kunci Jawaban" class="w-8 h-8 rounded-lg text-emerald-600 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/50 transition flex items-center justify-center">
+                                            <i class="icon-check-square w-4 h-4"></i>
+                                        </a>
+                                    )}
+                                    {soal.type !== 1 && (
+                                        <div class="w-8 h-8"></div> <!-- placeholder to keep alignment -->
+                                    )}
+                                    <div class="w-px h-4 bg-surface-200 mx-0.5"></div>
+                                    <a href={`/admin/soal/edit/${soal.id}`} title="Edit Soal" class="w-8 h-8 rounded-lg text-surface-600 hover:text-primary-600 hover:bg-primary-50 transition flex items-center justify-center">
+                                        <i class="icon-edit-2 w-4 h-4"></i>
+                                    </a>
+                                    <button title="Hapus Soal" class="w-8 h-8 rounded-lg text-surface-500 hover:text-danger hover:bg-danger/10 transition flex items-center justify-center" onclick={`deleteQuestion(${soal.id})`}>
+                                        <i class="icon-trash-2 w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    ))
+                )}
+            </tbody>
+        </table>
+    </div>
+</AdminLayout>
+
+<script>
+    (window as any).deleteQuestion = async (id: number) => {
+        if (!confirm("Apakah Anda yakin ingin menghapus soal ini beserta pilihan jawabannya?\n(Tindakan ini tidak dapat dibatalkan)")) return;
+
+        try {
+            const res = await fetch("/api/soal/pertanyaan", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: [id] }),
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert("Gagal menghapus: " + data.error);
+                return;
+            }
+            window.location.reload();
+        } catch (e) {
+            alert("Terjadi kesalahan jaringan.");
+        }
+    };
+
+
+</script>

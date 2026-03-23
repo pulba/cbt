@@ -1,0 +1,48 @@
+Penjelasan Detail Fitur: C. Manajemen Peserta (Siswa)
+Berdasarkan struktur controller yang mengatur operasional akun peserta ujian, berikut adalah rincian fungsionalitas dan logika di balik Manajemen Peserta.
+
+1. Grup/Kelas (Peserta_group.php)
+Fitur ini bertindak sebagai basis (fondasi) dari seluruh keanggotaan peserta, di mana setiap siswa wajib tergabung dalam satu grup/kelas. Fungsi Utama & Logika:
+
+index() & get_datatable(): Menampilkan daftar seluruh grup yang terdaftar menggunakan AJAX.
+tambah() & edit(): Operasi CRUD untuk grup (cbt_user_grup_model). Terdapat validasi ketat yang mencegah admin membuat dua Group dengan nama yang sama persis (count_by_kolom('grup_nama')).
+Penghapusan Grup (Proteksi): Saat admin mencoba menghapus sebuah Grup, sistem akan mengecek terlebih dahulu tabel jadwal ujian (cbt_tesgrup_model). Jika "Grup X" saat ini masih terdaftar di dalam "Jadwal Ujian Y", penghapusan akan ditolak. Ini memastikan tidak ada data ujian terhapus secara tidak sengaja.
+2. Daftar Peserta (Peserta_daftar.php)
+Layar manajemen untuk operasi CRUD (Tampil, Tambah, Ubah, Hapus) siswa secara individual/satuan. Fungsi Utama & Logika:
+
+index(): Menampilkan filter berdasarkan grup. Jika tabel cbt_user_grup kosong, sistem menolak menampilkan form tambah (dropdown group akan bertuliskan KOSONG).
+tambah() & edit(): Menyimpan profil siswa ke tabel cbt_user.
+Admin mendaftarkan Username, Password, Nama Lengkap, dan Email.
+Terdapat validasi cek kembar (count_by_kolom('user_name')). Tidak boleh ada dua Username siswa yang sama di seluruh database.
+hapus_daftar_siswa(): Memungkinkan hapus massal (berdasarkan checkbox list yang dicentang). Data yang terhapus mencakup akun login siswa (user_id).
+3. Import Peserta (Peserta_import.php)
+Sangat berguna pada awal semester untuk mendaftarkan ratusan siswa sekaligus menggunakan format Microsoft Excel (.xls/.xlsx). Fungsi Utama & Logika:
+
+Proses Upload: Menggunakan CodeIgniter Upload Class, mengarahkan berkas Excel ke sub-direktori uploads/public/.
+import_file():
+Menggunakan library pihak ketiga PHPExcel.
+Sistem mulai memindai teks (parsing) dari Baris ke-2 (Baris pertama dianggap sebagai Header Nama Kolom).
+Kolom terdiri dari: 1(Username), 2(Password), 3(Nama), 4(Email), 5(Group), 6(Catatan).
+Validasi Kesalahan Berantai:
+Sistem mengecek apakah nama grup di kolom 5 Excel sudah dibuat di aplikasi? Jika belum, penambahan siswa baris itu ditolak ("Group X belum dibuat").
+Sistem mengecek apakah Username siswa sudah ada? Jika sudah ada, ditolak ("[Username] sudah digunakan").
+Jika semua valid, string password langsung di-insert apa adanya (bertipe clear-text, sengaja tidak di-enkripsi md5/bcrypt agar bisa dicetak di Kartu Ujian siswa nantinya).
+4. Cetak Kartu Ujian (Peserta_kartu.php)
+Fungsi vital untuk membagikan akun (Username/Password) fisik langsung ke tangan siswa. Fungsi Utama & Logika:
+
+index(): Memilih "Grup/Kelas" yang ingin di cetak massal.
+cetak_kartu():
+Melakukan permintaan SQL massal: "Tarik semua akun Siswa yang terikat pada ID Grup ini".
+Mambaca pengaturan sistem (cbt_konfigurasi_model) untuk menempatkan Nama Sekolah dan Logo Header CBT.
+Melakukan loop (foreach) dari array database, menyuntikkan data print-out berupa format tabel berkotak (border) HTML untuk setiap siswa. Format HTML/CSS dirancang sedemikian rupa agar menghasilkan potongan kertas (kartu) ketika tombol Ctrl+P (Print) ditekan pada Browser komputer admin.
+5. Reset Login (Peserta_reset.php)
+Fitur keamanan yang mengatur sistem penguncian sesi. Mengapa ini penting? CBT ini melarang 1 akun aktif di 2 komputer bersamaan. Jika komputer siswa tiba-tiba "Mati Lampu" saat sedang tes, status database masih mencatat ia sedang online, sehingga siswa tidak bisa login lagi walaupun komputer sudah menyala (Pesan error: Silahkan Hubungi Admin). Fungsi Utama & Logika:
+
+index():
+Mengecek pengaturan sakelar aplikasi (proteksi_multilogin).
+Kalau Proteksi Multi-Login diset='Tidak', layar reset ini tidak dapat dipergunakan. Jika diset='Ya', layar ini aktif.
+reset_daftar_peserta():
+Ketika Guru/Pengawas mencentang nama anak yang komputernya tadi mati lampu lalu meng-klik Reset, sistem akan berjalan:
+Merubah kolom status di tabel cbt_user (user_login = 0).
+Ini yang krusial: Memeriksa pengaturan direktori sesi CI ($config['sess_driver']). Jika Session disimpan di Database (biasanya tabel ci_sessions / cbt_sessions), sistem akan menembak perintah DELETE WHERE ID = Username pada tabel session tersebut untuk mematikan cookie PHP di komputer lama siswa secara paksa.
+Setelah berhasil di-reset, status login siswa bebas kembali dan ia bisa mengulang login dari layar depannya.

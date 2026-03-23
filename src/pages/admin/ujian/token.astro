@@ -1,0 +1,422 @@
+---
+import AdminLayout from "../../../layouts/AdminLayout.astro";
+import { db } from "../../../db";
+import { tests, testTokens } from "../../../db/schema";
+import { eq, desc } from "drizzle-orm";
+
+// 1. Garbage Collection (Auto cleanup expired tokens)
+const tokensQuery = await db
+    .select({
+        id: testTokens.id,
+        token: testTokens.token,
+        lifetimeMinutes: testTokens.lifetimeMinutes,
+        createdAt: testTokens.createdAt,
+        testId: testTokens.testId,
+        testName: tests.name,
+    })
+    .from(testTokens)
+    .leftJoin(tests, eq(testTokens.testId, tests.id))
+    .orderBy(desc(testTokens.createdAt))
+    .all();
+
+const now = new Date().getTime();
+const activeTokens: typeof tokensQuery = [];
+
+// Cleanup logic
+for (const t of tokensQuery) {
+    if (!t.createdAt) continue;
+    const expiresAt = t.createdAt.getTime() + t.lifetimeMinutes * 60000;
+    if (now > expiresAt) {
+        // Expired, delete from DB
+        await db.delete(testTokens).where(eq(testTokens.id, t.id));
+    } else {
+        // Still active
+        activeTokens.push(t);
+    }
+}
+
+// Prepare dropdown for Token generation (Only tests requiring tokens)
+const activeTests = await db
+    .select({
+        id: tests.id,
+        name: tests.name,
+    })
+    .from(tests)
+    .where(eq(tests.requireToken, true))
+    .orderBy(desc(tests.id))
+    .all();
+---
+
+<AdminLayout title="Manajemen Token Ujian">
+    <div
+        class="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+    >
+        <div>
+            <nav
+                class="flex text-sm text-surface-500 mb-2"
+                aria-label="Breadcrumb"
+            >
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a
+                            href="/admin/ujian"
+                            class="hover:text-primary-600 transition-colors"
+                            >Ujian</a
+                        >
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium"
+                                >Token Masuk</span
+                            >
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800">
+                Manajemen Token (PIN) Ujian
+            </h2>
+            <p class="text-sm text-surface-500 mt-1">
+                Rilis dan bagikan token kepada siswa agar bisa mulai mengerjakan
+                tes.
+            </p>
+        </div>
+        <div class="text-right">
+            <span
+                class="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-100 text-surface-600 text-xs font-semibold rounded-full"
+            >
+                <i class="icon-refresh-cw w-3 h-3"></i> Auto-Garbage Collection Aktif
+            </span>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Form Generate Token Baru -->
+        <div class="lg:col-span-1">
+            <div
+                class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden sticky top-6"
+            >
+                <div class="p-4 border-b border-surface-200 bg-surface-50/50">
+                    <h3
+                        class="font-bold text-surface-800 flex items-center gap-2"
+                    >
+                        <i class="icon-key w-4 h-4 text-surface-400"></i> Generate
+                        Token Baru
+                    </h3>
+                </div>
+                <div class="p-5">
+                    {
+                        activeTests.length === 0 ? (
+                            <div class="text-center py-6">
+                                <i class="icon-info w-8 h-8 text-surface-300 mx-auto mb-2" />
+                                <p class="text-sm text-surface-500">
+                                    Tidak ada ujian aktif yang mewajibkan Token
+                                    saat ini.
+                                </p>
+                                <a
+                                    href="/admin/ujian"
+                                    class="text-primary-600 font-medium text-xs mt-2 inline-block hover:underline"
+                                >
+                                    Ke Pengaturan Ujian
+                                </a>
+                            </div>
+                        ) : (
+                            <form id="token-form" class="space-y-4">
+                                <div>
+                                    <label
+                                        for="testId"
+                                        class="block text-sm font-medium text-surface-700 mb-1.5"
+                                    >
+                                        Pilih Ujian{" "}
+                                        <span class="text-danger">*</span>
+                                    </label>
+                                    <select
+                                        id="testId"
+                                        name="testId"
+                                        required
+                                        class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
+                                    >
+                                        <option value="" disabled selected>
+                                            -- Pilih Ujian --
+                                        </option>
+                                        {activeTests.map((t) => (
+                                            <option value={t.id}>
+                                                {t.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label
+                                        for="lifetimeMinutes"
+                                        class="block text-sm font-medium text-surface-700 mb-1.5"
+                                    >
+                                        Masa Aktif (Menit){" "}
+                                        <span class="text-danger">*</span>
+                                    </label>
+                                    <select
+                                        id="lifetimeMinutes"
+                                        name="lifetimeMinutes"
+                                        required
+                                        class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
+                                    >
+                                        <option value="15">15 Menit</option>
+                                        <option value="30">30 Menit</option>
+                                        <option value="60">1 Jam</option>
+                                        <option value="120">2 Jam</option>
+                                        <option value="1440">
+                                            1 Hari (24 Jam)
+                                        </option>
+                                    </select>
+                                    <p class="text-[10px] text-surface-500 mt-1">
+                                        Token akan hangus otomatis setelah waktu
+                                        ini berlalu.
+                                    </p>
+                                </div>
+
+                                <div class="pt-2 border-t border-surface-100">
+                                    <label class="flex items-center gap-2 cursor-pointer mb-2">
+                                        <input
+                                            type="checkbox"
+                                            id="custom-token-toggle"
+                                            class="w-4 h-4 text-primary-600 rounded border-surface-300 focus:ring-primary-500"
+                                        />
+                                        <span class="text-sm text-surface-700 font-medium">
+                                            Gunakan Token Kustom
+                                        </span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        id="customToken"
+                                        name="customToken"
+                                        placeholder="Contoh: BISMILLAH"
+                                        class="hidden w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800 uppercase font-mono"
+                                    />
+                                    <p
+                                        id="customTokenHelp"
+                                        class="hidden text-[10px] text-surface-500 mt-1"
+                                    >
+                                        Kosongkan jika ingin digenerate huruf
+                                        acak oleh sistem.
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    id="btn-submit"
+                                    class="w-full px-4 py-2.5 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30 flex justify-center items-center"
+                                >
+                                    <span>Rilis Token</span>
+                                    <div
+                                        id="btn-spinner"
+                                        class="hidden ml-2 w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
+                                    />
+                                </button>
+                            </form>
+                        )
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Daftar Token Aktif -->
+        <div class="lg:col-span-2">
+            <div
+                class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden flex flex-col h-full"
+            >
+                <div
+                    class="p-4 border-b border-surface-200 bg-surface-50/50 flex justify-between items-center"
+                >
+                    <h3 class="font-bold text-surface-800">
+                        Token Aktif & Berjalan
+                    </h3>
+                </div>
+
+                <div class="p-0 overflow-x-auto flex-1">
+                    <table class="w-full text-left text-sm text-surface-600">
+                        <thead
+                            class="bg-white border-b border-surface-200 text-surface-700 font-semibold"
+                        >
+                            <tr>
+                                <th class="px-5 py-3 w-40">PIN/Token</th>
+                                <th class="px-5 py-3">Ujian</th>
+                                <th class="px-5 py-3 text-center w-32"
+                                    >Kadalwuarsa</th
+                                >
+                                <th class="px-5 py-3 text-center w-16">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-surface-100">
+                            {
+                                activeTokens.length === 0 ? (
+                                    <tr>
+                                        <td
+                                            colspan="4"
+                                            class="px-5 py-12 text-center"
+                                        >
+                                            <div class="inline-flex justify-center items-center w-12 h-12 rounded-full bg-surface-100 text-surface-400 mb-3">
+                                                <i class="icon-shield w-6 h-6" />
+                                            </div>
+                                            <h4 class="font-medium text-surface-700 mb-1">
+                                                Belum Ada Token Aktif
+                                            </h4>
+                                            <p class="text-sm text-surface-500">
+                                                Silakan rilis token baru melalui
+                                                form di samping.
+                                            </p>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    activeTokens.map((t) => {
+                                        const createdAt = t.createdAt
+                                            ? t.createdAt.getTime()
+                                            : 0;
+                                        const expiresAt =
+                                            createdAt +
+                                            t.lifetimeMinutes * 60000;
+
+                                        // Make sure you format dates safely for Astro server rendering
+                                        const formatTime = (ms: number) => {
+                                            const d = new Date(ms);
+                                            return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+                                        };
+
+                                        return (
+                                            <tr class="hover:bg-surface-50/50 transition-colors">
+                                                <td class="px-5 py-4">
+                                                    <div
+                                                        class="flex items-center justify-between bg-surface-100 border border-surface-200 rounded px-3 py-1.5 cursor-pointer hover:bg-surface-200 transition"
+                                                        onclick={`navigator.clipboard.writeText('${t.token}').then(() => alert('Token disalin!'))`}
+                                                        title="Klik untuk Copy"
+                                                    >
+                                                        <span class="font-bold font-mono text-base text-surface-800 tracking-widest">
+                                                            {t.token}
+                                                        </span>
+                                                        <i class="icon-copy w-3 h-3 text-surface-400" />
+                                                    </div>
+                                                </td>
+                                                <td class="px-5 py-4">
+                                                    <div class="font-medium text-surface-800 line-clamp-2">
+                                                        {t.testName}
+                                                    </div>
+                                                </td>
+                                                <td class="px-5 py-4 text-center">
+                                                    <div class="text-xs font-semibold text-danger">
+                                                        Jam{" "}
+                                                        {formatTime(expiresAt)}
+                                                    </div>
+                                                    <div class="text-[10px] text-surface-500">
+                                                        {t.lifetimeMinutes}{" "}
+                                                        Menit Aktif
+                                                    </div>
+                                                </td>
+                                                <td class="px-5 py-4 text-center">
+                                                    <button
+                                                        onclick={`revokeToken(${t.id})`}
+                                                        class="w-8 h-8 rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10 transition inline-flex items-center justify-center"
+                                                        title="Cabut Token Sekarang"
+                                                    >
+                                                        <i class="icon-x-circle w-4 h-4" />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                )
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</AdminLayout>
+
+<script>
+    // Toggle Custom Token Input
+    const toggle = document.getElementById(
+        "custom-token-toggle",
+    ) as HTMLInputElement;
+    const input = document.getElementById("customToken") as HTMLInputElement;
+    const help = document.getElementById("customTokenHelp");
+
+    toggle?.addEventListener("change", () => {
+        if (toggle.checked) {
+            input.classList.remove("hidden");
+            help?.classList.remove("hidden");
+            input.focus();
+        } else {
+            input.classList.add("hidden");
+            help?.classList.add("hidden");
+            input.value = "";
+        }
+    });
+
+    // Submitting Token
+    const form = document.getElementById("token-form") as HTMLFormElement;
+    form?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const btnSubmit = document.getElementById(
+            "btn-submit",
+        ) as HTMLButtonElement;
+        const spinner = document.getElementById("btn-spinner");
+
+        btnSubmit.disabled = true;
+        spinner?.classList.remove("hidden");
+
+        try {
+            const formData = new FormData(form);
+            const payload = {
+                testId: formData.get("testId"),
+                lifetimeMinutes: formData.get("lifetimeMinutes"),
+                customToken: formData.get("customToken"),
+            };
+
+            const res = await fetch("/api/ujian/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+
+            if (data.status) {
+                window.location.reload();
+            } else {
+                alert(data.message || "Gagal merilis token.");
+                btnSubmit.disabled = false;
+                spinner?.classList.add("hidden");
+            }
+        } catch (error) {
+            alert("Kesalahan menghubungkan ke server.");
+            btnSubmit.disabled = false;
+            spinner?.classList.add("hidden");
+        }
+    });
+
+    // Revoke Token manually
+    (window as any).revokeToken = async (id: number) => {
+        if (
+            !confirm(
+                "Cabut (hanguskan) token ini sekarang? Siswa tidak bisa lagi masuk menggunakan PIN ini.",
+            )
+        )
+            return;
+
+        try {
+            const res = await fetch("/api/ujian/token", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id }),
+            });
+
+            if (res.ok) {
+                window.location.reload();
+            }
+        } catch (e) {
+            alert("Gagal mencabut token.");
+        }
+    };
+</script>

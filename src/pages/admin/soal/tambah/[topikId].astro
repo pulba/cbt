@@ -1,0 +1,539 @@
+---
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { db } from "../../../../db";
+import { topics, questions, questionAnswers } from "../../../../db/schema";
+import { eq, desc } from "drizzle-orm";
+
+const { id } = Astro.params;
+
+if (!id) {
+    return Astro.redirect("/admin/soal/topik");
+}
+
+const topicId = parseInt(id);
+const topic = await db
+    .select()
+    .from(topics)
+    .where(eq(topics.id, topicId))
+    .get();
+
+if (!topic) {
+    return Astro.redirect("/admin/soal/topik");
+}
+
+const rawQuestions = await db
+    .select()
+    .from(questions)
+    .where(eq(questions.topicId, topic.id))
+    .orderBy(desc(questions.id))
+    .all();
+
+const allAnswers = await db.select().from(questionAnswers).all();
+
+const existingQuestions = rawQuestions.map((q) => {
+    return {
+        ...q,
+        answers: allAnswers.filter((a) => a.questionId === q.id),
+    };
+});
+---
+
+<AdminLayout title={`Buat Soal: ${topic.name}`}>
+    <!-- Add Quill CSS & JS -->
+    <link
+        href="https://cdn.quilljs.com/1.3.7/quill.snow.css"
+        rel="stylesheet"
+    />
+    <script is:inline src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+
+    <div
+        class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4"
+    >
+        <div>
+            <nav
+                class="flex text-sm text-surface-500 mb-2"
+                aria-label="Breadcrumb"
+            >
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a
+                            href="/admin/soal/topik"
+                            class="hover:text-primary-600 transition-colors"
+                            >Topik</a
+                        >
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <a
+                                href={`/admin/soal/daftar/${topic.id}`}
+                                class="hover:text-primary-600 transition-colors line-clamp-1 max-w-[150px]"
+                                >{topic.name}</a
+                            >
+                        </div>
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium"
+                                >Buat Soal</span
+                            >
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800 flex items-center">
+                <a
+                    href={`/admin/soal/daftar/${topic.id}`}
+                    class="mr-3 p-1.5 rounded-lg hover:bg-surface-100 transition-colors text-surface-500 hover:text-surface-700"
+                >
+                    <i class="icon-arrow-left w-5 h-5"></i>
+                </a>
+                Buat Soal Baru
+            </h2>
+        </div>
+    </div>
+
+    <div
+        class="bg-white rounded-xl border border-surface-200 shadow-sm max-w-4xl mb-12"
+    >
+        <div class="p-6 border-b border-surface-200">
+            <h3 class="font-semibold text-surface-800">
+                Formulir Penyusunan Pertanyaan
+            </h3>
+            <p class="text-sm text-surface-500 mt-1">
+                Gunakan editor di bawah ini untuk mengetik soal, menyisipkan
+                gambar, atau persamaan.
+            </p>
+        </div>
+
+        <div
+            id="error-alert"
+            class="hidden mx-6 mt-6 p-4 rounded-lg bg-danger/10 border border-danger/20 text-danger text-sm flex items-start"
+        >
+            <i class="icon-alert-circle w-5 h-5 mr-3 shrink-0"></i>
+            <span id="error-msg">Terjadi kesalahan</span>
+        </div>
+
+        <form id="tambah-form" class="p-6 space-y-6">
+            <input type="hidden" id="topicId" value={topic.id} />
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label
+                        for="type"
+                        class="block text-sm font-medium text-surface-700 mb-1.5"
+                        >Jenis Soal <span class="text-danger">*</span></label
+                    >
+                    <select
+                        id="type"
+                        name="type"
+                        required
+                        class="w-full px-4 py-2.5 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
+                    >
+                        <option value="1">Pilihan Ganda</option>
+                        <option value="2">Esai / Uraian</option>
+                        <option value="3">Jawaban Singkat</option>
+                    </select>
+                </div>
+                <div>
+                    <label
+                        for="difficulty"
+                        class="block text-sm font-medium text-surface-700 mb-1.5"
+                        >Tingkat Kesulitan</label
+                    >
+                    <select
+                        id="difficulty"
+                        name="difficulty"
+                        class="w-full px-4 py-2.5 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
+                    >
+                        <option value="1">Mudah (Level 1)</option>
+                        <option value="2">Sedang (Level 2)</option>
+                        <option value="3">Sulit (Level 3)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-surface-700 mb-1.5"
+                    >Isi Pertanyaan <span class="text-danger">*</span></label
+                >
+                <!-- Quill Editor Container -->
+                <div
+                    class="bg-surface-50 border border-surface-200 rounded-t-lg border-b-0"
+                    id="toolbar-container"
+                >
+                    <span class="ql-formats">
+                        <select class="ql-header"></select>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-bold"></button>
+                        <button class="ql-italic"></button>
+                        <button class="ql-underline"></button>
+                        <button class="ql-strike"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <select class="ql-color"></select>
+                        <select class="ql-background"></select>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-script" value="sub"></button>
+                        <button class="ql-script" value="super"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-header" value="1"></button>
+                        <button class="ql-header" value="2"></button>
+                        <button class="ql-blockquote"></button>
+                        <button class="ql-code-block"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-list" value="ordered"></button>
+                        <button class="ql-list" value="bullet"></button>
+                        <button class="ql-indent" value="-1"></button>
+                        <button class="ql-indent" value="+1"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <select class="ql-align"></select>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-link"></button>
+                        <button class="ql-image"></button>
+                        <button class="ql-formula"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-clean"></button>
+                    </span>
+                </div>
+                <div
+                    id="editor-container"
+                    class="bg-white min-h-[250px] rounded-b-lg text-base"
+                >
+                </div>
+            </div>
+
+            <div
+                class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface-50 p-4 rounded-lg border border-surface-200"
+            >
+                <div>
+                    <label
+                        for="audio"
+                        class="block text-sm font-medium text-surface-700 mb-1.5"
+                        >File Audio (Opsional)</label
+                    >
+                    <input
+                        type="file"
+                        id="audio"
+                        name="audio"
+                        accept="audio/mp3, audio/wav, audio/ogg"
+                        class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm text-surface-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 transition"
+                    />
+                    <p class="text-xs text-surface-400 mt-1">
+                        Khusus soal tipe Listening.
+                    </p>
+                </div>
+                <div>
+                    <label
+                        for="audioPlayLimit"
+                        class="block text-sm font-medium text-surface-700 mb-1.5"
+                        >Batas Putar Audio</label
+                    >
+                    <select
+                        id="audioPlayLimit"
+                        name="audioPlayLimit"
+                        class="w-full px-4 py-2.5 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
+                    >
+                        <option value="0">Tidak terbatas</option>
+                        <option value="1">1 kali putar</option>
+                        <option value="2">2 kali putar</option>
+                        <option value="3">3 kali putar</option>
+                    </select>
+                </div>
+            </div>
+
+            <div
+                class="pt-4 border-t border-surface-100 flex justify-end gap-3"
+            >
+                <a
+                    href={`/admin/soal/daftar/${topic.id}`}
+                    class="px-5 py-2.5 bg-white border border-surface-200 hover:bg-surface-50 text-surface-700 text-sm font-medium rounded-lg transition-colors"
+                >
+                    Batal
+                </a>
+                <button
+                    type="submit"
+                    id="submit-btn"
+                    class="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center shadow-md shadow-primary-500/20"
+                >
+                    <i class="icon-save w-4 h-4 mr-2"></i> Simpan Pertanyaan
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Data Table Container for Existing Questions -->
+    <div
+        class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden mb-12"
+    >
+        <div
+            class="bg-surface-50 border-b border-surface-200 px-6 py-4 flex items-center justify-between"
+        >
+            <h3
+                class="font-semibold text-surface-800 uppercase tracking-wide text-sm"
+            >
+                Daftar Soal Default - {topic.name}
+            </h3>
+            <a
+                href={`/admin/soal/daftar/${topic.id}`}
+                class="text-primary-600 hover:text-primary-700 text-sm font-medium transition-colors flex items-center"
+            >
+                Refresh Data Soal <i class="icon-refresh-cw w-3.5 h-3.5 ml-1.5"
+                ></i>
+            </a>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm text-surface-600">
+                <thead
+                    class="bg-white border-b border-surface-200 text-surface-700 font-semibold"
+                >
+                    <tr>
+                        <th class="px-5 py-4 w-12 text-center">Nomor</th>
+                        <th class="px-5 py-4 min-w-[300px]">Pertanyaan</th>
+                        <th class="px-5 py-4 w-40">Jawaban</th>
+                        <th class="px-5 py-4 w-28 text-center">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {
+                        existingQuestions.length === 0 ? (
+                            <tr>
+                                <td
+                                    colspan="4"
+                                    class="px-5 py-8 text-center text-surface-400"
+                                >
+                                    Belum ada soal untuk mata pelajaran ini.
+                                </td>
+                            </tr>
+                        ) : (
+                            existingQuestions.map((q, idx) => (
+                                <tr class="hover:bg-surface-50/50 transition-colors">
+                                    <td class="px-5 py-4 text-center text-surface-400 font-medium">
+                                        {idx + 1}
+                                    </td>
+                                    <td class="px-5 py-4">
+                                        <div
+                                            class="font-medium text-surface-800 line-clamp-2 prose prose-sm max-w-none prose-p:my-0 prose-img:max-h-8 prose-img:inline"
+                                            set:html={q.text}
+                                        />
+                                    </td>
+                                    <td class="px-5 py-4">
+                                        {q.type === 1 &&
+                                        q.answers.length > 0 ? (
+                                            <div class="flex flex-wrap gap-1.5">
+                                                {q.answers.map((ans, aIdx) => {
+                                                    const label =
+                                                        String.fromCharCode(
+                                                            65 + aIdx,
+                                                        ); // A, B, C, D, E...
+                                                    return (
+                                                        <div
+                                                            class={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold border ${ans.isCorrect ? "bg-emerald-100 border-emerald-300 text-emerald-700" : "bg-surface-100 border-surface-200 text-surface-500"}`}
+                                                            title={
+                                                                ans.isCorrect
+                                                                    ? "Jawaban Benar"
+                                                                    : "Jawaban Salah"
+                                                            }
+                                                        >
+                                                            {label}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : q.type === 1 ? (
+                                            <span class="text-xs text-danger flex items-center">
+                                                <i class="icon-alert-triangle w-3.5 h-3.5 mr-1" />{" "}
+                                                Kosong
+                                            </span>
+                                        ) : (
+                                            <span class="px-2.5 py-1 bg-surface-100 text-surface-500 rounded-lg text-[10px] font-bold tracking-wider uppercase">
+                                                Esai
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td class="px-5 py-4 text-center">
+                                        <div class="flex items-center justify-center gap-1.5">
+                                            {q.type === 1 && (
+                                                <a
+                                                    href={`/admin/soal/jawaban/${q.id}`}
+                                                    title="Kelola Kunci Jawaban"
+                                                    class="w-8 h-8 rounded-lg text-emerald-600 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/50 transition flex items-center justify-center"
+                                                >
+                                                    <i class="icon-check-square w-4 h-4" />
+                                                </a>
+                                            )}
+                                            <a
+                                                href={`/admin/soal/edit/${q.id}`}
+                                                title="Edit Soal"
+                                                class="w-8 h-8 rounded-lg text-surface-600 hover:text-primary-600 hover:bg-primary-50 transition flex items-center justify-center"
+                                            >
+                                                <i class="icon-edit-2 w-4 h-4" />
+                                            </a>
+                                            <button
+                                                title="Hapus Soal"
+                                                class="w-8 h-8 rounded-lg text-surface-500 hover:text-danger hover:bg-danger/10 transition flex items-center justify-center"
+                                                onclick={`deleteQuestion(${q.id})`}
+                                            >
+                                                <i class="icon-trash-2 w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))
+                        )
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</AdminLayout>
+
+<script>
+    (window as any).deleteQuestion = async (id: number) => {
+        if (
+            !confirm(
+                "Apakah Anda yakin ingin menghapus soal ini beserta pilihan jawabannya?\n(Tindakan ini tidak dapat dibatalkan)",
+            )
+        )
+            return;
+
+        try {
+            const res = await fetch("/api/soal/pertanyaan", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: [id] }),
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert("Gagal menghapus: " + data.error);
+                return;
+            }
+            window.location.reload();
+        } catch (e) {
+            alert("Terjadi kesalahan jaringan.");
+        }
+    };
+
+    // Initialize Quill editor
+    const quill = new (window as any).Quill("#editor-container", {
+        modules: {
+            toolbar: "#toolbar-container",
+        },
+        placeholder: "Ketikkan soal Anda di sini...",
+        theme: "snow",
+    });
+
+    const form = document.getElementById("tambah-form") as HTMLFormElement;
+    const submitBtn = document.getElementById(
+        "submit-btn",
+    ) as HTMLButtonElement;
+    const errorAlert = document.getElementById("error-alert");
+    const errorMsg = document.getElementById("error-msg");
+    const topicId = (document.getElementById("topicId") as HTMLInputElement)
+        .value;
+
+    form?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        if (errorAlert) errorAlert.classList.add("hidden");
+
+        // Get HTML content from Quill
+        const editorHtml = quill.root.innerHTML;
+
+        if (editorHtml === "<p><br></p>" || editorHtml.trim() === "") {
+            if (errorAlert && errorMsg) {
+                errorMsg.textContent = "Isi pertanyaan tidak boleh kosong.";
+                errorAlert.classList.remove("hidden");
+            }
+            return;
+        }
+
+        const originalHtml = submitBtn.innerHTML;
+        submitBtn.innerHTML = `<i class="icon-loader w-4 h-4 mr-2 animate-spin"></i> Menyimpan...`;
+        submitBtn.disabled = true;
+
+        const formData = new FormData(form);
+
+        // Handle audio file (mocked as string for now, to be implemented via File API if needed later)
+        // Drizzle schema accepts string (path/URL) for audio.
+        let audioPath: string | null = null;
+        const audioFile = formData.get("audio") as File;
+        if (audioFile && audioFile.size > 0) {
+            // In a real scenario, you'd upload this file first to a /api/upload endpoint
+            // For now, we simulate success with a fake path
+            audioPath = `/uploads/audio/${Date.now()}_${audioFile.name}`;
+            console.log("Mocking audio upload:", audioPath);
+        }
+
+        const data = {
+            topicId,
+            type: formData.get("type"),
+            difficulty: formData.get("difficulty"),
+            audioPlayLimit: formData.get("audioPlayLimit"),
+            audio: audioPath,
+            text: editorHtml,
+            isActive: true,
+        };
+
+        try {
+            const res = await fetch("/api/soal/pertanyaan", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+            });
+
+            const result = await res.json();
+
+            if (result.success) {
+                window.location.href = `/admin/soal/daftar/${topicId}`;
+            } else {
+                if (errorAlert && errorMsg) {
+                    errorMsg.textContent =
+                        result.error || "Gagal menyimpan data";
+                    errorAlert.classList.remove("hidden");
+                }
+            }
+        } catch (error) {
+            if (errorAlert && errorMsg) {
+                errorMsg.textContent =
+                    "Terjadi kesalahan jaringan, silakan coba lagi.";
+                errorAlert.classList.remove("hidden");
+            }
+        } finally {
+            submitBtn.innerHTML = originalHtml;
+            submitBtn.disabled = false;
+        }
+    });
+</script>
+
+<style is:global>
+    /* Slight adjustments for Quill to match our design system */
+    .ql-toolbar.ql-snow {
+        border-color: #e5e7eb !important;
+        border-top-left-radius: 0.5rem;
+        border-top-right-radius: 0.5rem;
+        padding: 12px !important;
+    }
+    .ql-container.ql-snow {
+        border-color: #e5e7eb !important;
+        border-bottom-left-radius: 0.5rem;
+        border-bottom-right-radius: 0.5rem;
+        font-family: inherit !important;
+    }
+    .ql-editor {
+        min-height: 250px;
+        padding: 1rem 1.25rem !important;
+    }
+    .ql-editor p {
+        margin-bottom: 0.75rem;
+    }
+</style>

@@ -1,0 +1,56 @@
+Penjelasan Detail Fitur: B. Manajemen Nilai & Laporan (Hasil)
+Berdasarkan analisis logis terhadap source code controllers untuk fitur Pelaporan, berikut adalah rincian mendalam mengenai cara kerja dan fungsi tiap modul nilai.
+
+1. Daftar Hasil Ujian (Tes_hasil.php)
+Fitur ini adalah dashboard utama bagi guru untuk memantau nilai siswa dan jalannya ujian secara real-time. Fungsi Utama & Logika:
+
+index(): Menampilkan filter berdasarkan Group/Kelas dan daftar Tes yang tersedia. Rentang waktu (date range) standar di set mulai dari H-1 hingga H+1 (strtotime('- 1 days')).
+get_datatable(): Memproses data secara asinkron menggunakan AJAX DataTable. Logikanya dibedakan menjadi dua berdasarkan "Status Tes":
+Jika status = mengerjakan (cbt_tes_user_model->get_datatable), sistem hanya menampilkan siswa yang sedang atau sudah ikut tes.
+Jika status = semua siswa (cbt_user_model->get_datatable_hasiltes), sistem menampilkan seluruh siswa terdaftar, meskipun nilainya 0 atau ada status "Belum Melewati Ujian".
+Sistem Waktu Real-time: Sistem kalkulasi sisa waktu tidak cuma memanggil database, melainkan menghitung selisih jam saat ini (new DateTime()) dengan waktu pembuatan tes di-tambah dengan setingan durasi tes (duration_time). Jika jam saat ini lebih besar dari batas, otomatis status dikunci menjadi "Selesai".
+edit_tes() (Kontrol Manual Ujian): Admin bisa memilih beberapa siswa sekaligus (menggunakan checkbox array) untuk melakukan pengaturan darurat:
+Hapus: Nilai dan sesi ujian siswa benar-benar dihapus dari memori server.
+Hentikan Paksa: Merubah kolom status siswa di database menjadi 4 (Selesai). Siswa yang sedang login akan Force Logout / ujiannya tertutup seketika.
+Buka Sesi: Merubah kolom status ujian menjadi 1 (Status Berjalan). Memungkinkan siswa untuk login dan melanjutkan kembali ujian dari tempat terakhir ia terputus (CBT Auto-Save resume).
+Tambah Waktu: Menambah toleransi waktu tambahan khusus untuk siswa tertentu bila ia mengalami error komputer.
+export(): Mengunduh daftar nilai ini secara cepat ke Microsoft Excel menggunakan format lama Excel 97-2003 (.xls via PHPExcel_IOFactory).
+2. Detail Hasil Siswa (Tes_hasil_detail.php)
+Digunakan jika guru meng-klik nama salah satu siswa pada "Daftar Hasil Ujian", ia bisa melihat jawaban si siswa persis 1 banding 1 layaknya lembar jawaban kertas. Fungsi Utama & Logika:
+
+index(): Melakukan join database untuk menyatukan Identitas Siswa (cbt_user_model), Identitas Ujian (cbt_tes_model), serta Sesi Ujian (cbt_tes_user_model).
+Mencetak "Skor yang di dapat siswa / Skor Maksimal Ujian", serta "Jumlah Jawaban Benar / Jumlah Total Soal". Nilai ini di-kalkulasi langsung secara on-the-fly lewat fungsi model (cbt_tes_soal_model->get_nilai).
+get_datatable(): Mem-parsing ulang soal-soal dan gambar yang khusus diterima oleh satu siswa tersebut (Karna soal CBT ini biasanya diacak tiap siswa).
+Logikanya membaca tabel persimpangan (cbt_tes_soal_jawaban_model), dan merekonstruksi tampilannya dalam tabel HTML.
+Jika Tipe 1 (Pilihan Ganda): Sistem mencocokkan setiap jawaban (soaljawaban_selected==1) dengan "Kunci Jawaban" (jawaban_benar==1).
+Kalau Tipe 2 (Essai) atau 3 (Singkat): Menampilkan kotak teks jawaban asli milik siswa secara apa adanya.
+3. Evaluasi Soal Essai (Tes_evaluasi.php)
+Sesi khusus untuk guru/admin agar bisa membaca jawaban essai siswa dan meng-input poin nilai secara manual (karena komputer tidak bisa menilai essay dinamis). Fungsi Utama & Logika:
+
+index(): Membaca seluruh tes/ujian (cbt_tes_user_model->get_by_group) yang memerlukan review dari guru.
+get_datatable(): Sama seperti DataTables lainnya, tapi tabel ini secara spesifik hanya menyaring Output Soal ($temp->soal_detail) beserta Output Jawaban Essai / Ketikan siswa ($temp->tessoal_jawaban_text) lengkap dengan button warna untuk "Evaluasi".
+simpan_nilai(): Logika simpan nilai cukup ketat.
+Menggunakan AJAX untuk menangkap nilai evaluasi guru (evaluasi-nilai).
+Mencek nilai minimal dan maksimal (misal Essai ini diberi bobot 10. Jika guru meng-input nilai 12, sistem otomatis Ditolak/Blocked dengan menampilkan Alert 'Nilai tidak boleh diatas Max!').
+Jika valid, nilai tersebut masuk ke kolom tessoal_nilai di database.
+Menyematkan jejak audit (tessoal_comment): "Sudah di koreksi oleh [username guru]" menggunakan session CI.
+4. Rekap Hasil (Laporan_rekap_hasil.php)
+Fungsi pelaporan besar-besaran standar sekolah, biasanya mirip seperti format Penilaian (Buku Leger). Fungsi Utama & Logika:
+
+index(): Menampilkan filter rentang Waktu dan Kelas/Grup yang dituju.
+export(): Menggunakan file template Excel kosong yang sudah didesain rapi (./public/form/form-data-rekap-hasil-tes.xlsx).
+Melakukan Query ke semua murid di suatu Kelas (cbt_user_model).
+Kemudian mengambil semua Tes (cbt_tesgrup_model) yang diujikan dalam Tanggal Rentang yang dipilih.
+Sistem Looping Matriks: Melakukan foreach di atas (Looping Kolom Ujian A, B, C...) lalu foreach menyamping (Siswa 1, 2, 3..). Di persilangan tersebut sistem menempelkan nilai ujian (cbt_tes_user_model->get_nilai_by_tes_user).
+Jika siswa bolos / belum tes, maka sel Excel ditulis string "N/A" (Not Available).
+Melakukan Push Download header ke Excel2007 (.xlsx).
+5. Analisis Butir Soal (Laporan_analisis_butir_soal.php)
+Laporan tingkat lanjut untuk menganalisis statistik validitas bank soal itu sendiri; yaitu mana soal yang "gagal/terlalu sulit" dan mana soal ujian yang terlalu memihak (Daya Beda Soal). Fungsi Utama & Logika:
+
+index(): Menampilkan filter Kelas dan Nama Ujian.
+export(): Juga bergantung pada template excel (./public/form/form-data-analisis-butir-soal.xlsx).
+Menarik data absensi Siswa di grup spesifik untuk Tes spesifik tersebut (cbt_tes_user_model->get_by_tes_group).
+Mambongkar (unpack) array jawaban dari metode get_by_testuser_order_soal (Diurutkan murni berdasarkan Nomor Soal Asli di bank soal, bukan urutan acak lembar ujian).
+Jika siswa menjawab BENAR/Punya Poin (tessoal_nilai > 0), kolom Excel diisi lambang 1.
+Jika siswa menjawab SALAH (tessoal_nilai <= 0), kolom Excel diisi lambang 0.
+Berkas Matrix biner ini (1 dan 0) inilah yang nantinya di-ekspor oleh guru BK/Admin Sekolah untuk keperluan rumus Item Response Theory / Analisis Butir Soal Kurikulum.

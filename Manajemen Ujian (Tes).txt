@@ -1,0 +1,54 @@
+Penjelasan Detail Fitur: D. Manajemen Ujian (Tes)
+Mengatur bagaimana sebuah lembar ujian (Soal + Waktu + Pengacakan) disajikan kepada siswa. Fitur ini menghubungkan antara Bank Soal dan Peserta. Berikut adalah logika fitur terkait:
+
+1. Buat/Edit Ujian (Tes_tambah.php)
+Fitur inti dari sistem CBT (Central Controller) yang berfungsi merakit modul tes, menetapkan aturan main ujian (waktu, acak naskah), dan menghubungkannya dengan grup peserta.
+
+Fungsi Utama & Logika:
+
+tambah_tes() (Membuat Kerangka Ujian):
+
+Menyimpan pengaturan dasar ke tabel cbt_tes. Data yang disimpan antara lain:
+Nama Tes & Deskripsi.
+Rentang Waktu Login (tes_begin_time - tes_end_time): Kapan siswa mulai boleh klik tombol Mulai, dan kapan tes tersebut otomatis hilang dari dashboard siswa (Kedaluwarsa).
+Durasi Pengerjaan (tes_duration_time): Berapa lama (dalam Menit) siswa boleh mengerjakan ujian setelah menekan tombol Mulai. Ini memicu timer countdown berbasis server-time.
+Aturan Poin (tes_score_right, wrong, unanswered): Skor khusus untuk setiap kondisi jawaban (berguna untuk mode penalti/SBMPTN).
+Menampilkan Hasil: Apakah siswa boleh melihat detail hasil/score instan setelah ujian klik Selesai.
+Token Requirement (tes_token): Opsi pengamanan, mewajibkan pengawas memberikan PIN rilis mendadak di ruangan tes.
+Intro/Instruksi Tes (upload_image()): Kemampuan ekstraktor DOMDocument di sini mengekstrak gambar Base64 dari editor instruction box menjadi file tunggal, khusus disimpan di /uploads/public/tes_upload/ sebagai intro selamat datang ujian.
+Setelah "kerangka" ini selesai disimpan di Master Tabel, kemudian skrip menyimpan pemetaan "Siapa yang berhak ikut Ujian ini?" ke dalam tabel relasi cbt_tesgrup (Mapping Tes ke Grup).
+tambah_soal() (Merakit Naskah Soal ke Dalam Ujian):
+
+Disinilah kehebatan pengacakannya (Randomization Engine Target). Admin tidak menunjuk nomor soal secara manual (contoh: masukkan soal no 1, 3, 5).
+Sebailknya, admin hanya menunjuk Topik (contoh: tarik soal dari Bank Soal -> Topik Matematika).
+Admin melerik parameter: Ambil n Jumlah Soal (tset_jumlah), dengan tipe pengacakan tertentu (tset_acak_soal = YA/TIDAK, tset_acak_jawaban = YA/TIDAK).
+Data komposisi rancangan ini disimpan di tabel blueprint cbt_tes_topik_set. Nanti, mesin ujian (di sisi Siswa) yang akan mengacak secara acak dan riil dari bank soal utama, menyesuaikan jumlah kuota per topik yang telah divonis pada controller ini.
+Kalkulasi Otomatis Skor Maksimal hitung_skor(): Jika tes sudah dibuat, sistem secara rekursif menjumlahkan (Jumlah Soal x Poin Benar) untuk menumbuhkan nilai di tes_max_score secara on-the-fly.
+Proteksi Penguncian Aktif:
+
+Jika seorang admin menekan Edit Waktu, atau Hapus Bank Soal pada Ujian X. Sistem mengecek cbt_tes_user_model->count_by_kolom('tesuser_tes_id').
+Jika sudah ada SATU SAJA siswa yang sedang (atau sudah) menekan tombol login/klik masuk ke Ujian X tersebut, maka Hak Akses Admin untuk mengubah struktur ujian Ditolak Total / Dikunci (Read-Only) untuk mempertahankan asas keadilan (Integritas Ujian). Admin hanya dizinkan mengubah durasi tenggang saja.
+2. Daftar Ujian (Tes_daftar.php)
+Fitur operasional sederhana untuk memantau ringkasan jadwal ujian apa saja yang masih berjalan atau telah berlalu.
+
+Fungsi Utama & Logika:
+
+get_datatable(): Mem-parsing dari Master Tabel cbt_tes. Merelasikan dengan Tabel Blueprint cbt_tes_topik_set untuk menerjemahkan secara ringkas ke String HTML (Contoh: Menampilkan daftar "(Topik Matemaika [10 Soal] - Acak: YA)" dalam satu kolom tabel).
+hapus_tes() & hapus_daftar_tes():
+Melakukan Transaksi DB / Hapus permanen berbayang (cascade delete logis) terhadap ujian terpilih.
+Fungsi ini juga membersihkan kerugian memori server dengan menggunakan delete_files() dan rmdir() CodeIgniter untuk "menghancurkan" folder attachment/intro gambar dari ujian yang telah dihapus di folder /tes_upload.
+3. Distribusi Token (Tes_token.php)
+Token (PIN dinamis) yang mengunci pintu masuk ujian sebelum Proktor/Pengawas memberikan aba-aba pengerjaan di ruangan Lab / Kelas Ujian sesungguhnya.
+
+Fungsi Utama & Logika:
+
+token() (Auto-Generate):
+
+Dipicu ketika operator menekan tombol "Generate Token".
+Menghasilkan 6 karakter campuran huruf dan angka acak menggunakan perintah PHP strtoupper(substr(uniqid(), 7)).
+Looping keamanan while(i==1): Sistem mencoba memasukkan token yang baru digenerate ke Database (cbt_tes_token_model). Jika sistem mendapati adanya token ganda/bertabrakan, kode akan mutar (loop reroll) menghasilkan generate kode uniqid baru sampai ia benar-benar dapat yang unik.
+Opsi "Masa Aktif": Token ini direkam (timestamp) lengkap kapan ia akan hangus otomatis (berdasarkan durasi Menit/Hari yang dipilih pengawas). Jika melampaui masa itu, token "Kadaluwarsa" dan pengawas harus men-generate ulang di papan tulis.
+token_manual():
+
+Membuka kebebasan bagi pengawas untuk membuat Token dengan kata-katanya sendiri (contoh: "BUDI12", "UJIAN1"), ketimbang menerima huruf aneh dari generate acak komputer. Selama token tersebut dikategorikan sebagai Token aktif di memori server dan valid, ia bisa dipakai.
+Otomatis Culling: Saat pengawas pertama kali membuka halaman Dashboard Token, fungsi index() langsung memanggil model delete_by_user_date untuk Membersihkan (Garbage Collection) dan membuang semua deretan token dari hari-hari / sesi sebelumnya yang sudah kadaluwarsa, mengosongkan memori table dari kotoran berlebih.

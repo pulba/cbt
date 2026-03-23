@@ -1,0 +1,180 @@
+---
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+---
+
+<AdminLayout title="Grup / Kelas">
+    <div
+        class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4"
+    >
+        <div>
+            <nav
+                class="flex text-sm text-surface-500 mb-2"
+                aria-label="Breadcrumb"
+            >
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a
+                            href="/admin/peserta"
+                            class="hover:text-primary-600 transition-colors"
+                            >Peserta</a
+                        >
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium"
+                                >Grup & Kelas</span
+                            >
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800">
+                Manajemen Grup / Kelas
+            </h2>
+            <p class="text-sm text-surface-500 mt-1">
+                Kelola daftar kelompok, jurusan, atau kelas siswa.
+            </p>
+        </div>
+        <div class="flex gap-2">
+            <a
+                href="/admin/peserta/grup/tambah"
+                class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30"
+            >
+                <i class="icon-plus w-4 h-4 inline-block mr-1"></i> Tambah Grup
+            </a>
+        </div>
+    </div>
+
+    <!-- Stats & Filters -->
+    <div
+        class="bg-white p-4 rounded-xl border border-surface-200 shadow-sm mb-6 flex flex-wrap gap-4 items-center justify-between"
+    >
+        <div class="relative w-full sm:w-64">
+            <i
+                class="icon-search absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400"
+            ></i>
+            <input
+                type="text"
+                id="search-input"
+                placeholder="Cari nama grup..."
+                class="w-full pl-9 pr-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            />
+        </div>
+    </div>
+
+    <!-- Data Table Container -->
+    <div
+        class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden"
+        id="grup-container"
+    >
+        <table class="w-full text-left text-sm text-surface-600">
+            <thead
+                class="bg-surface-50 border-b border-surface-200 text-surface-700 font-semibold"
+            >
+                <tr>
+                    <th class="px-5 py-3 w-12 text-center">No</th>
+                    <th class="px-5 py-3">Nama Grup</th>
+                    <th class="px-5 py-3">Deskripsi (Opsional)</th>
+                    <th class="px-5 py-3 text-center">Jumlah Siswa</th>
+                    <th class="px-5 py-3 w-32 text-center">Aksi</th>
+                </tr>
+            </thead>
+            <tbody id="grup-table-body" class="divide-y divide-surface-100">
+                <tr>
+                    <td
+                        colspan="5"
+                        class="px-5 py-8 text-center text-surface-400"
+                    >
+                        <i class="icon-loader w-6 h-6 animate-spin mx-auto mb-2"
+                        ></i> Memuat data grup...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</AdminLayout>
+
+<script>
+    async function loadGroups(search = "") {
+        const tbody = document.getElementById("grup-table-body");
+        if (!tbody) return;
+
+        try {
+            const res = await fetch(
+                `/api/peserta/grup?search=${encodeURIComponent(search)}`,
+            );
+            const json = await res.json();
+
+            if (json.data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="px-5 py-8 text-center text-surface-500">Belum ada grup kelas tersedia. Silakan Tambah Grup.</td></tr>`;
+                return;
+            }
+
+            let html = "";
+            json.data.forEach((grup: any, idx: number) => {
+                html += `
+                    <tr class="hover:bg-surface-50/50 transition-colors">
+                        <td class="px-5 py-4 text-center text-surface-400">${idx + 1}</td>
+                        <td class="px-5 py-4 font-medium text-surface-800">${grup.name}</td>
+                        <td class="px-5 py-4 text-surface-500">${grup.description || "-"}</td>
+                        <td class="px-5 py-4 text-center">
+                            <span class="px-2 py-1 bg-surface-100 text-surface-700 rounded-full text-xs font-medium">
+                                ${grup.studentCount} Siswa
+                            </span>
+                        </td>
+                        <td class="px-5 py-4 text-center">
+                            <div class="flex items-center justify-center gap-2">
+                                <a href="/admin/peserta/grup/edit/${grup.id}" title="Edit Grup" class="w-8 h-8 rounded-lg text-primary-600 hover:bg-primary-50 transition flex items-center justify-center">
+                                    <i class="icon-edit-2 w-4 h-4"></i>
+                                </a>
+                                <button title="Hapus Grup" class="w-8 h-8 rounded-lg text-danger hover:bg-danger/10 transition flex items-center justify-center" onclick="deleteGroup(${grup.id}, '${grup.name}')">
+                                    <i class="icon-trash-2 w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="5" class="px-5 py-8 text-center text-danger">Gagal memuat data. Silakan refresh halaman.</td></tr>`;
+        }
+    }
+
+    (window as any).deleteGroup = async (id: number, name: string) => {
+        if (
+            !confirm(
+                `Apakah Anda yakin ingin menghapus grup "${name}"?\n(Penghapusan akan ditolak jika ada jadwal ujian atau siswa dalam grup ini)`,
+            )
+        )
+            return;
+
+        try {
+            const res = await fetch("/api/peserta/grup", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id }),
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert("Gagal menghapus: " + data.error);
+                return;
+            }
+            alert("Grup berhasil dihapus");
+            loadGroups(document.getElementById("search-input")?.value || "");
+        } catch (e) {
+            alert("Terjadi kesalahan jaringan.");
+        }
+    };
+
+    // Initial load
+    loadGroups();
+
+    // Search events
+    document.getElementById("search-input")?.addEventListener("input", (e) => {
+        loadGroups(e.target.value);
+    });
+</script>
