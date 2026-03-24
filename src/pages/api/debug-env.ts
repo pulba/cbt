@@ -8,15 +8,24 @@ export const GET: APIRoute = async ({ locals }) => {
         const envKeys = Object.keys(env);
         const processKeys = (globalThis as any).process?.env ? Object.keys((globalThis as any).process.env) : [];
         
+        const bcrypt = await import('bcryptjs');
+        const start = Date.now();
+        const testHash = await bcrypt.hash('admin123', 8); // Lower rounds for testing
+        const testMatch = await bcrypt.compare('admin123', testHash);
+        const duration = Date.now() - start;
+
         return new Response(JSON.stringify({
             status: 'ok',
             runtime_exists: !!runtime,
             env_keys: envKeys,
-            process_env_keys: processKeys,
             vars_check: {
                 TURSO_URL: !!(env.TURSO_DATABASE_URL || (globalThis as any).process?.env?.TURSO_DATABASE_URL),
                 TURSO_TOKEN: !!(env.TURSO_AUTH_TOKEN || (globalThis as any).process?.env?.TURSO_AUTH_TOKEN),
                 JWT_SECRET: !!(env.JWT_SECRET || (globalThis as any).process?.env?.JWT_SECRET),
+            },
+            bcrypt_test: {
+                match: testMatch,
+                duration_ms: duration
             }
         }), {
             status: 200,
