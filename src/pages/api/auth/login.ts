@@ -6,7 +6,7 @@ import { signToken } from '../../../lib/auth';
 import bcrypt from 'bcryptjs';
 import { configs } from '../../../db/schema';
 
-export const POST: APIRoute = async ({ request, cookies }) => {
+export const POST: APIRoute = async ({ request, cookies, locals }) => {
 try {
 const body = await request.json();
 const { username, password, type } = body;
