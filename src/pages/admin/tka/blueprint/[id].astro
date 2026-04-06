@@ -1,0 +1,1212 @@
+---
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { db } from "../../../../db";
+import {
+    tests,
+    testGroups,
+    userGroups,
+    topics,
+    testTopicSets,
+    testUsers,
+} from "../../../../db/schema";
+import { eq, and, lt, sql } from "drizzle-orm";
+
+const { id } = Astro.params;
+
+if (!id) {
+    return Astro.redirect("/admin/ujian");
+}
+
+const testId = parseInt(id);
+const testData = await db
+    .select()
+    .from(tests)
+    .where(eq(tests.id, testId))
+    .get();
+
+if (!testData || testData.mode !== 'tka') {
+    return Astro.redirect("/admin/tka");
+}
+
+// Active Lock Check: Only lock if there are students who haven't finished (status < 4)
+const activeUsers = await db
+    .select()
+    .from(testUsers)
+    .where(and(eq(testUsers.testId, testId), lt(testUsers.status, 4)))
+    .all();
+const isLocked = activeUsers.length > 0;
+
+// Fetch all available components
+const allGroups = await db.select().from(userGroups).all();
+const allTopics = await db.select().from(topics).all();
+
+// Fetch current configurations
+const assignedGroupsQuery = await db
+    .select()
+    .from(testGroups)
+    .where(eq(testGroups.testId, testId))
+    .all();
+const assignedGroupIds = assignedGroupsQuery.map((g) => g.groupId);
+
+// For topic sets, we need to join with topics name
+const assignedTopicSets = await db
+    .select({
+        id: testTopicSets.id,
+        topicId: testTopicSets.topicId,
+        topicName: topics.name,
+        questionType: testTopicSets.questionType,
+        questionCount: testTopicSets.questionCount,
+        answerCount: testTopicSets.answerCount,
+        shuffleQuestions: testTopicSets.shuffleQuestions,
+        shuffleAnswers: testTopicSets.shuffleAnswers,
+        beginTime: testTopicSets.beginTime,
+        endTime: testTopicSets.endTime,
+        durationMinutes: testTopicSets.durationMinutes,
+        scoreRightOverride: testTopicSets.scoreRightOverride,
+        scoreWrongOverride: testTopicSets.scoreWrongOverride,
+    })
+    .from(testTopicSets)
+    .leftJoin(topics, eq(testTopicSets.topicId, topics.id))
+    .where(eq(testTopicSets.testId, testId))
+    .all();
+
+// Auto calculate questions
+let totalQuestions = 0;
+assignedTopicSets.forEach((t) => (totalQuestions += t.questionCount));
+
+// Max score logic: Use tests.maxScore or default to 100
+const calculatedMaxScore = testData.maxScore && testData.maxScore > 0 ? testData.maxScore : 100;
+const weightPerQuestion = totalQuestions > 0 ? calculatedMaxScore / totalQuestions : 0;
+
+// Parse TKA Score Config
+let tkaScores = {
+    "1": 1, "2": 100, "3": 100,
+    "4": 1, "5": 1, "6": 1
+};
+if (testData.tkaScoreConfig) {
+    try {
+        const parsed = JSON.parse(testData.tkaScoreConfig);
+        tkaScores = { ...tkaScores, ...parsed };
+    } catch(e) {}
+}
+---
+
+<AdminLayout title={`Konfigurasi Ujian: ${testData.name}`}>
+    <div
+        class="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+    >
+    <!-- Quill CSS & JS -->
+    <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet" />
+    <script is:inline src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+        <div>
+            <nav
+                class="flex text-sm text-surface-500 mb-2"
+                aria-label="Breadcrumb"
+            >
+                <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                    <li class="inline-flex items-center">
+                        <a
+                            href="/admin/tka"
+                            class="hover:text-primary-600 transition-colors"
+                            >Ujian TKA</a
+                        >
+                    </li>
+                    <li>
+                        <div class="flex items-center">
+                            <i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                            <span class="text-surface-700 font-medium"
+                                >Blueprint TKA</span
+                            >
+                        </div>
+                    </li>
+                </ol>
+            </nav>
+            <h2 class="text-xl font-bold text-surface-800 flex items-center">
+                <a
+                    href="/admin/tka"
+                    class="mr-3 p-1.5 rounded-lg hover:bg-surface-100 transition-colors text-surface-500 hover:text-surface-700"
+                >
+                    <i class="icon-arrow-left w-5 h-5"></i>
+                </a>
+                Konfigurasi & Blueprint TKA
+            </h2>
+            <p class="text-sm text-surface-500 mt-1 ml-10">
+                Kelola distribusi soal, grup peserta, dan pengaturan aturan ujian <strong class="text-surface-700"
+                    >{testData.name}</strong
+                >.
+            </p>
+        </div>
+
+        <div
+            class="bg-surface-50 border border-surface-200 rounded-lg px-4 py-2 flex flex-col items-end"
+        >
+            <span
+                class="text-xs text-surface-500 uppercase tracking-widest font-bold"
+                >Skor Maksimal</span
+            >
+            <span class="text-2xl font-black text-primary-600"
+                >{calculatedMaxScore}</span
+            >
+            <span class="text-[10px] text-surface-400"
+                >Total Soal: {totalQuestions} @ {weightPerQuestion.toFixed(2)} Poin</span
+            >
+        </div>
+    </div>
+
+    <!-- Tabs Header -->
+    <div class="mb-6 border-b border-surface-200">
+        <div class="flex gap-8">
+            <button 
+                id="tab-blueprint-btn"
+                onclick="switchTab('blueprint')"
+                class="pb-3 text-sm font-bold border-b-2 border-primary-600 text-primary-600 transition-all flex items-center gap-2"
+            >
+                <i class="icon-layers w-4 h-4"></i>
+                Blueprint & Akses
+            </button>
+            <button 
+                id="tab-settings-btn"
+                onclick="switchTab('settings')"
+                class="pb-3 text-sm font-bold border-b-2 border-transparent text-surface-400 hover:text-surface-600 transition-all flex items-center gap-2"
+            >
+                <i class="icon-settings w-4 h-4"></i>
+                Aturan & Instruksi
+            </button>
+        </div>
+    </div>
+
+    <!-- Tab 1: Blueprint & Akses -->
+    <div id="tab-blueprint-content" class="space-y-6">
+
+
+    {
+        isLocked && (
+            <div class="mb-6 bg-amber-50 border border-amber-200 text-amber-800 px-5 py-4 rounded-xl flex items-start gap-4">
+                <div class="p-2 bg-amber-100/50 rounded-lg text-amber-600">
+                    <i class="icon-lock w-6 h-6" />
+                </div>
+                <div>
+                    <strong class="font-bold text-base block mb-1">
+                        Status: Terkunci (Read-Only)
+                    </strong>
+                    <p class="text-sm">
+                        Blueprint ujian ini (Grup & Komposisi Soal) dikunci
+                        sementara karena{" "}
+                        <span class="font-bold">
+                            {activeUsers.length} siswa
+                        </span>{" "}
+                        sedang / belum selesai mengerjakannya. Untuk mencegah
+                        ketimpangan sistem acak soal pada peserta yang sedang
+                        berlangsung, fitur ini dimatikan sementara.
+                    </p>
+                </div>
+            </div>
+        )
+    }
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Panel Kiri: Grup Peserta -->
+        <div
+            class="lg:col-span-1 border border-surface-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col"
+        >
+            <div
+                class="p-4 border-b border-surface-200 bg-surface-50/50 flex justify-between items-center"
+            >
+                <h3 class="font-bold text-surface-800 flex items-center gap-2">
+                    <i class="icon-users w-4 h-4 text-surface-400"></i> Grup Akses
+                </h3>
+            </div>
+            <div class="p-4 flex-1">
+                <p class="text-xs text-surface-500 mb-4">
+                    Centang grup/kelas mana saja yang diizinkan untuk melihat
+                    dan mengikuti ujian ini di layar dashboard mereka.
+                </p>
+
+                <form id="group-form">
+                    <div
+                        class={`space-y-2 ${isLocked ? "opacity-70 pointer-events-none" : ""}`}
+                    >
+                        {
+                            allGroups.length === 0 ? (
+                                <p class="text-xs text-surface-400 italic">
+                                    Belum ada grup peserta terdaftar.
+                                </p>
+                            ) : (
+                                allGroups.map((group) => (
+                                    <label class="flex items-center gap-3 p-3 rounded-lg border border-surface-200 bg-surface-50 hover:bg-surface-100 transition cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            name="groups[]"
+                                            value={group.id}
+                                            checked={assignedGroupIds.includes(
+                                                group.id,
+                                            )}
+                                            class="w-4 h-4 text-primary-600 border-surface-300 rounded focus:ring-primary-500"
+                                        />
+                                        <span class="text-sm font-medium text-surface-700">
+                                            {group.name}
+                                        </span>
+                                    </label>
+                                ))
+                            )
+                        }
+                    </div>
+                    {
+                        !isLocked && (
+                            <button
+                                type="button"
+                                id="btn-save-groups"
+                                class="mt-4 w-full px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition flex justify-center items-center"
+                            >
+                                <span>Simpan Hak Akses</span>
+                                <div
+                                    id="btn-save-groups-spinner"
+                                    class="hidden ml-2 w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
+                                />
+                            </button>
+                        )
+                    }
+                </form>
+            </div>
+        </div>
+
+        <!-- Panel Kanan: Setting Topik Blueprint -->
+        <div
+            class="lg:col-span-2 border border-surface-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col"
+        >
+            <div
+                class="p-4 border-b border-surface-200 bg-surface-50/50 flex justify-between items-center"
+            >
+                <h3 class="font-bold text-surface-800 flex items-center gap-2">
+                    <i class="icon-layers w-4 h-4 text-surface-400"></i> Komposisi
+                    Topik (Mesin Pengacak)
+                </h3>
+            </div>
+
+            {
+                !isLocked && assignedTopicSets.length === 0 && (
+                    <div class="p-4 border-b border-surface-200 bg-surface-50">
+                        <div class="mb-4 p-3 bg-primary-50 border border-primary-200 rounded-lg flex items-start gap-3">
+                            <i class="icon-info w-5 h-5 text-primary-600 shrink-0 mt-0.5"></i>
+                            <div class="text-xs text-primary-800 leading-relaxed">
+                                <strong>Satu Ujian = Satu Mata Pelajaran.</strong> Untuk menjaga akurasi laporan nilai dan kemudahan siswa, setiap Blueprint hanya boleh berisi 1 Topik (Mata Pelajaran).
+                            </div>
+                        </div>
+                        <form
+                            id="add-topic-form"
+                            class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end"
+                        >
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-medium text-surface-700 mb-1">
+                                    Pilih Topik Soal
+                                </label>
+                                <select
+                                    name="topicId"
+                                    id="topicId"
+                                    required
+                                    class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm text-surface-800"
+                                >
+                                    <option value="" disabled selected>
+                                        -- Pilih Topik --
+                                    </option>
+                                    {allTopics.map((t) => (
+                                        <option value={t.id}>{t.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-surface-700 mb-1">
+                                    Jumlah
+                                </label>
+                                <input
+                                    type="number"
+                                    name="questionCount"
+                                    id="questionCount"
+                                    min="1"
+                                    required
+                                    placeholder="Contoh: 10"
+                                    class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm text-surface-800 font-mono"
+                                />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-surface-700 mb-1">
+                                    Tipe Soal
+                                </label>
+                                <select
+                                    name="questionType"
+                                    id="questionType"
+                                    class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm text-surface-800"
+                                >
+                                    <option value="1">Pilihan Ganda</option>
+                                    <option value="5">Ceklis (Pilihan Ganda Kompleks)</option>
+                                    <option value="4">Menjodohkan</option>
+                                    <option value="6">Benar / Salah</option>
+                                    <option value="3">Jawaban Singkat</option>
+                                    <option value="2">Esai</option>
+                                    <option value="7">Campuran (Acak Semua Tipe)</option>
+                                </select>
+                            </div>
+                            <div id="shuffleQuestions-container">
+                                <label class="block text-xs font-medium text-surface-700 mb-1">
+                                    Acak Soal?
+                                </label>
+                                <select
+                                    name="shuffleQuestions"
+                                    id="shuffleQuestions"
+                                    class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm text-surface-800"
+                                >
+                                    <option value="1">Ya</option>
+                                    <option value="0">Tidak</option>
+                                </select>
+                            </div>
+                            <!-- Added inputs for scheduling per topic -->
+                            <div class="md:col-span-1">
+                                <label class="block text-xs font-medium text-surface-700 mb-1">
+                                    Mulai Tersedia
+                                </label>
+                                <div class="flex flex-col gap-1">
+                                    <input
+                                        type="date"
+                                        id="beginTime-date"
+                                        class="w-full px-2 py-1.5 bg-white border border-surface-200 rounded-lg text-xs text-surface-800"
+                                    />
+                                    <div class="flex items-center gap-1">
+                                        <select id="beginTime-hour" class="flex-1 px-1 py-1 bg-white border border-surface-200 rounded-lg text-[11px]">
+                                            {Array.from({length: 24}).map((_, i) => (
+                                                <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                            ))}
+                                        </select>
+                                        <span class="text-[10px]">:</span>
+                                        <select id="beginTime-min" class="flex-1 px-1 py-1 bg-white border border-surface-200 rounded-lg text-[11px]">
+                                            {Array.from({length: 60}).map((_, i) => (
+                                                <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Input Poin Override dihapus sesuai mode TKA -->
+                            <input type="hidden" name="scoreRightOverride" id="scoreRightOverride" value="" />
+                            <input type="hidden" name="scoreWrongOverride" id="scoreWrongOverride" value="" />
+                            <div class="md:col-span-1">
+                                <label class="block text-xs font-medium text-surface-700 mb-1">
+                                    Batas Akhir (Tutup)
+                                </label>
+                                <div class="flex flex-col gap-1">
+                                    <input
+                                        type="date"
+                                        id="endTime-date"
+                                        class="w-full px-2 py-1.5 bg-white border border-surface-200 rounded-lg text-xs text-surface-800"
+                                    />
+                                    <div class="flex items-center gap-1">
+                                        <select id="endTime-hour" class="flex-1 px-1 py-1 bg-white border border-surface-200 rounded-lg text-[11px]">
+                                            {Array.from({length: 24}).map((_, i) => (
+                                                <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                            ))}
+                                        </select>
+                                        <span class="text-[10px]">:</span>
+                                        <select id="endTime-min" class="flex-1 px-1 py-1 bg-white border border-surface-200 rounded-lg text-[11px]">
+                                            {Array.from({length: 60}).map((_, i) => (
+                                                <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-surface-700 mb-1">
+                                    Durasi (Menit) <span class="text-danger">*</span>
+                                </label>
+                                <input
+                                    type="number"
+                                    name="durationMinutes"
+                                    id="durationMinutes"
+                                    min="1"
+                                    required
+                                    value="60"
+                                    class="w-full px-3 py-2 bg-white border border-surface-200 rounded-lg text-sm text-surface-800 font-mono"
+                                />
+                            </div>
+                            <div>
+                                <button
+                                    type="submit"
+                                    class="w-full px-3 py-2 bg-surface-800 text-white rounded-lg text-sm font-medium hover:bg-surface-700 transition"
+                                >
+                                    <i class="icon-plus w-3.5 h-3.5 inline mr-1" />{" "}
+                                    Tambah
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                )
+            }
+
+            {
+                !isLocked && assignedTopicSets.length > 0 && (
+                     <div class="p-4 border-b border-surface-200 bg-amber-50 flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-3">
+                            <i class="icon-check-circle w-5 h-5 text-amber-600"></i>
+                            <span class="text-xs font-medium text-amber-800">Topik sudah ditentukan. Hapus topik di bawah jika ingin mengganti dengan mata pelajaran lain.</span>
+                        </div>
+                    </div>
+                )
+            }
+
+            <div class="p-0 overflow-x-auto">
+                <table class="w-full text-left text-sm text-surface-600">
+                    <thead
+                        class="bg-white border-b border-surface-200 text-surface-700 font-semibold"
+                    >
+                        <tr>
+                            <th class="px-5 py-3">Topik</th>
+                            <th class="px-5 py-3 text-center">Soal</th>
+                            <th class="px-5 py-3 text-center">Tipe</th>
+                            <th class="px-5 py-3 text-center">Durasi</th>
+                            <th class="px-5 py-3 text-center">Jadwal</th>
+                            <th class="px-5 py-3 text-center">Acak Soal</th>
+                            <th class="px-5 py-3 text-center w-24">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-100">
+                        {
+                            assignedTopicSets.length === 0 ? (
+                                <tr>
+                                    <td
+                                        colspan={isLocked ? 6 : 7}
+                                        class="px-5 py-10 text-center text-surface-500"
+                                    >
+                                        Belum ada komposisi soal. Ujian masih
+                                        berstatus kosong!
+                                    </td>
+                                </tr>
+                            ) : (
+                                assignedTopicSets.map((ts) => (
+                                    <tr class="hover:bg-surface-50/50 transition-colors">
+                                        <td class="px-5 py-3 font-medium text-surface-800">
+                                            {ts.topicName ||
+                                                `Topik ID ${ts.topicId}`}
+                                        </td>
+                                        <td class="px-5 py-3 text-center font-bold text-primary-600">
+                                            {ts.questionCount}
+                                        </td>
+                                        <td class="px-5 py-3 text-center">
+                                            <span class="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded bg-surface-100 text-surface-600">
+                                                {ts.questionType === 1
+                                                    ? "Pilihan Ganda"
+                                                    : ts.questionType === 2
+                                                      ? "Esai"
+                                                      : ts.questionType === 4
+                                                        ? "Menjodohkan"
+                                                        : ts.questionType === 5
+                                                          ? "Ceklis"
+                                                          : ts.questionType === 6
+                                                            ? "Benar / Salah"
+                                                            : ts.questionType === 7
+                                                              ? "Campuran"
+                                                              : "Singkat"}
+                                            </span>
+                                        </td>
+                                        <td class="px-5 py-3 whitespace-nowrap text-center text-sm font-medium text-surface-800">
+                                            {ts.durationMinutes}m
+                                        </td>
+                                        <td class="px-5 py-3 text-center text-xs text-surface-500 max-w-[140px]">
+                                            {ts.beginTime || ts.endTime ? (
+                                                <div class="flex flex-col gap-0.5">
+                                                    {ts.beginTime ? <span class="text-emerald-700">M: {new Date(ts.beginTime).toLocaleString('id-ID', { hour12: false, dateStyle: 'short', timeStyle: 'short' })}</span> : <span>M: -</span>}
+                                                    {ts.endTime ? <span class="text-rose-700">S: {new Date(ts.endTime).toLocaleString('id-ID', { hour12: false, dateStyle: 'short', timeStyle: 'short' })}</span> : <span>S: -</span>}
+                                                </div>
+                                            ) : (
+                                                <span class="italic bg-surface-100 px-2 py-0.5 rounded text-[10px] uppercase font-bold text-surface-400">Sembarang Waktu</span>
+                                            )}
+                                        </td>
+                                        <td class="px-5 py-3 text-center">
+                                            {ts.shuffleQuestions ? (
+                                                <span class="text-emerald-600">
+                                                    <i class="icon-check w-4 h-4 inline-block" />
+                                                </span>
+                                            ) : (
+                                                <span class="text-rose-600">
+                                                    <i class="icon-x w-4 h-4 inline-block" />
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td class="px-5 py-3 text-center">
+                                            <div class="flex items-center justify-center gap-1">
+                                                <button
+                                                    onclick={`openScheduleModal(${ts.id}, '${(ts.topicName || 'Topik').replace(/'/g, "\\'") }', '${ts.beginTime ? new Date(ts.beginTime).toISOString().slice(0,16) : ''}', '${ts.endTime ? new Date(ts.endTime).toISOString().slice(0,16) : ''}', ${ts.durationMinutes})`}
+                                                    title="Atur Ulang Jadwal"
+                                                    class="w-7 h-7 rounded-md text-primary-500 hover:text-primary-700 hover:bg-primary-50 transition inline-flex items-center justify-center"
+                                                >
+                                                    <i class="icon-clock text-sm" />
+                                                </button>
+                                                {!isLocked && (
+                                                    <button
+                                                        onclick={`removeTopicSet(${ts.id})`}
+                                                        title="Hapus Topik"
+                                                        class="w-7 h-7 rounded-md text-surface-400 hover:text-danger hover:bg-danger/10 transition inline-flex items-center justify-center"
+                                                    >
+                                                        <i class="icon-trash-2 text-sm" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )
+                        }
+                        {
+                            assignedTopicSets.length > 0 && (
+                                <tr class="bg-surface-50/50">
+                                    <td class="px-5 py-3 font-bold text-surface-800 text-right">
+                                        TOTAL SOAL:
+                                    </td>
+                                    <td class="px-5 py-3 text-center font-black text-primary-700">
+                                        {totalQuestions}
+                                    </td>
+                                    <td colspan={isLocked ? 4 : 5} />
+                                </tr>
+                            )
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div
+                class="p-4 bg-surface-50 border-t border-surface-200 text-xs text-surface-500 rounded-b-xl"
+            >
+                <i
+                    class="icon-info w-3.5 h-3.5 inline mr-1 -mt-0.5 align-middle"
+                ></i>
+                Setiap kali siswa menekan tombol "Mulai Ujian", mesin CBT akan menarik
+                {totalQuestions} soal baru secara riil dari bank soal berdasarkan
+                aturan tabel di atas.
+            </div>
+        </div>
+    </div>
+    </div>
+    <!-- Tab 2: Aturan & Instruksi -->
+    <div id="tab-settings-content" class="hidden space-y-6">
+        <div class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden p-6 max-w-5xl">
+            <form id="edit-form" class="space-y-6">
+                <input type="hidden" name="id" value={testId} />
+                
+                <div id="error-alert-settings" class="hidden bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-lg flex items-start gap-3">
+                    <i class="icon-alert-circle w-5 h-5 flex-shrink-0 mt-0.5"></i>
+                    <div class="text-sm">
+                        <strong class="font-semibold block mb-1">Gagal menyimpan pengaturan</strong>
+                        <span id="error-msg-settings"></span>
+                    </div>
+                </div>
+
+                <!-- Bagian 1: Identitas Tes -->
+                <div class={`p-5 rounded-lg border ${isLocked ? "bg-surface-100/50 border-surface-200/60 opacity-80" : "bg-surface-50 border-surface-200"}`}>
+                    <h3 class="font-bold text-surface-800 mb-4 border-b border-surface-200 pb-2 flex items-center justify-between">
+                        <span>1. Identitas Ujian & Nama</span>
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="md:col-span-2">
+                            <label for="name" class="block text-sm font-medium text-surface-700 mb-1.5">Nama Ujian <span class="text-danger">*</span></label>
+                            <input
+                                type="text"
+                                id="name"
+                                name="name"
+                                required
+                                value={testData.name}
+                                readonly={isLocked}
+                                class={`w-full px-4 py-2.5 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800 ${isLocked ? "cursor-not-allowed bg-surface-100 text-surface-500" : ""}`}
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bagian 2: Penilaian & Aturan -->
+                <div class={`p-5 rounded-lg border ${isLocked ? "bg-surface-100/50 border-surface-200/60 opacity-80" : "bg-surface-50 border-surface-200"}`}>
+                    <h3 class="font-bold text-surface-800 mb-4 border-b border-surface-200 pb-2 flex items-center justify-between">
+                        <span>2. Sistem Penilaian & Aturan</span>
+                    </h3>
+                    <div class="grid grid-cols-1 gap-6 mb-6">
+                        <div>
+                            <label for="maxScore" class="block text-sm font-medium text-surface-700 mb-1.5">Skala Nilai Maksimal</label>
+                            <input type="number" step="0.1" id="maxScore" name="maxScore" value={testData.maxScore || 100} readonly={isLocked} class={`w-full px-4 py-2.5 bg-primary-50 border border-primary-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-primary-900 font-bold ${isLocked ? "cursor-not-allowed bg-surface-100 text-surface-500" : ""}`} />
+                            <p class="text-[10px] text-surface-400 mt-1">Nilai tertinggi yang bisa didapat (Normalisasi).</p>
+                        </div>
+                        <input type="hidden" id="scoreRight" name="scoreRight" value={testData.scoreRight} />
+                    </div>
+
+                    <!-- TKA Per-Type Scoring Panel -->
+                    <div class={`mb-6 border border-indigo-200 bg-indigo-50/40 rounded-xl p-5 ${isLocked ? "opacity-80" : ""}`}>
+                        <h4 class="text-sm font-bold text-indigo-700 mb-1 flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            Poin Benar Per Jenis Soal (TKA)
+                        </h4>
+                        <p class="text-[11px] text-indigo-500 mb-4">Nilai default untuk setiap kali Anda menunjuk topik baru di Blueprint. Jika diubah di sini, hanya berefek pada topik yang <strong>baru</strong> ditambahkan setelah ini.</p>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                            <div>
+                                <label class="block text-[11px] font-semibold text-indigo-600 mb-1">Pilihan Ganda</label>
+                                <input type="number" step="0.1" id="tkaPg" name="tkaPg" value={tkaScores["1"]} readonly={isLocked}
+                                    class={`w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition ${isLocked ? 'bg-surface-100 cursor-not-allowed text-surface-500' : ''}`} />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-indigo-600 mb-1">Esai</label>
+                                <input type="number" step="0.1" id="tkaEsai" name="tkaEsai" value={tkaScores["2"]} readonly={isLocked}
+                                    class={`w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition ${isLocked ? 'bg-surface-100 cursor-not-allowed text-surface-500' : ''}`} />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-indigo-600 mb-1">Jaw. Singkat</label>
+                                <input type="number" step="0.1" id="tkaSingkat" name="tkaSingkat" value={tkaScores["3"]} readonly={isLocked}
+                                    class={`w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition ${isLocked ? 'bg-surface-100 cursor-not-allowed text-surface-500' : ''}`} />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-indigo-600 mb-1">Menjodohkan</label>
+                                <input type="number" step="0.1" id="tkaJodoh" name="tkaJodoh" value={tkaScores["4"]} readonly={isLocked}
+                                    class={`w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition ${isLocked ? 'bg-surface-100 cursor-not-allowed text-surface-500' : ''}`} />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-indigo-600 mb-1">Ceklis</label>
+                                <input type="number" step="0.1" id="tkaCeklis" name="tkaCeklis" value={tkaScores["5"]} readonly={isLocked}
+                                    class={`w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition ${isLocked ? 'bg-surface-100 cursor-not-allowed text-surface-500' : ''}`} />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-indigo-600 mb-1">Benar / Salah</label>
+                                <input type="number" step="0.1" id="tkaBs" name="tkaBs" value={tkaScores["6"]} readonly={isLocked}
+                                    class={`w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition ${isLocked ? 'bg-surface-100 cursor-not-allowed text-surface-500' : ''}`} />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-x-8 gap-y-4">
+                        <label class="relative flex cursor-pointer items-center">
+                            <input type="checkbox" id="showResult" name="showResult" class="peer sr-only" checked={testData.showResult} />
+                            <div class="h-6 w-11 rounded-full bg-surface-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-surface-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none focus:ring-4 focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:bg-surface-100 disabled:after:bg-surface-50"></div>
+                            <span class="ml-3 text-sm font-medium text-surface-700">Tampilkan Nilai ke Siswa</span>
+                        </label>
+                        <label class="relative flex cursor-pointer items-center">
+                            <input type="checkbox" id="showDetail" name="showDetail" class="peer sr-only" checked={testData.showDetail} />
+                            <div class="h-6 w-11 rounded-full bg-surface-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-surface-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none focus:ring-4 focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:bg-surface-100 disabled:after:bg-surface-50"></div>
+                            <span class="ml-3 text-sm font-medium text-surface-700">Tampilkan Detail (Pembahasan)</span>
+                        </label>
+                    </div>
+                </div>
+
+
+
+                <div class="pt-4 border-t border-surface-200 flex justify-end gap-3">
+                    <button
+                        type="submit"
+                        id="submit-settings-btn"
+                        class="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30 flex items-center justify-center disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        <span id="settings-btn-text">Simpan Perubahan Aturan</span>
+                        <div id="settings-btn-spinner" class="hidden ml-2 w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Schedule Edit Modal -->
+    <div
+        id="schedule-modal"
+        class="fixed inset-0 z-[100] hidden items-center justify-center p-4 bg-surface-900/50 backdrop-blur-sm"
+    >
+        <div
+            id="schedule-modal-content"
+            class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform scale-95 opacity-0 transition-all duration-200"
+        >
+            <!-- Modal Header -->
+            <div class="bg-gradient-to-br from-primary-600 to-indigo-600 px-6 py-5 text-white">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                            <i class="icon-clock text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-base leading-tight">Atur Ulang Jadwal</h3>
+                            <p id="schedule-topic-name" class="text-primary-200 text-xs mt-0.5"></p>
+                        </div>
+                    </div>
+                    <button onclick="closeScheduleModal()" class="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition">
+                        <i class="icon-x text-base"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Body -->
+            <div class="p-6 space-y-4">
+                <input type="hidden" id="schedule-topic-set-id" />
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-surface-500 uppercase tracking-wider mb-1.5">
+                            <i class="icon-play text-xs text-emerald-500"></i> Mulai Tersedia
+                        </label>
+                        <div class="flex flex-col gap-2">
+                            <input
+                                type="date"
+                                id="schedule-begin-date"
+                                class="w-full px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400 transition"
+                            />
+                            <div class="flex items-center gap-2">
+                                <select id="schedule-begin-hour" class="flex-1 px-2 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-800 focus:ring-1 focus:ring-primary-400">
+                                    {Array.from({length: 24}).map((_, i) => (
+                                        <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                    ))}
+                                </select>
+                                <span class="font-bold">:</span>
+                                <select id="schedule-begin-min" class="flex-1 px-2 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-800 focus:ring-1 focus:ring-primary-400">
+                                    {Array.from({length: 60}).map((_, i) => (
+                                        <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-surface-400 mt-1">Kosongkan = Sembarang Waktu</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-surface-500 uppercase tracking-wider mb-1.5">
+                            <i class="icon-x text-xs text-rose-500"></i> Batas Akhir (Tutup)
+                        </label>
+                        <div class="flex flex-col gap-2">
+                            <input
+                                type="date"
+                                id="schedule-end-date"
+                                class="w-full px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400 transition"
+                            />
+                            <div class="flex items-center gap-2">
+                                <select id="schedule-end-hour" class="flex-1 px-2 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-800 focus:ring-1 focus:ring-primary-400">
+                                    {Array.from({length: 24}).map((_, i) => (
+                                        <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                    ))}
+                                </select>
+                                <span class="font-bold">:</span>
+                                <select id="schedule-end-min" class="flex-1 px-2 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-800 focus:ring-1 focus:ring-primary-400">
+                                    {Array.from({length: 60}).map((_, i) => (
+                                        <option value={i.toString().padStart(2, '0')}>{i.toString().padStart(2, '0')}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-surface-400 mt-1">Kosongkan = Tidak Ada Batas</p>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-surface-500 uppercase tracking-wider mb-1.5">
+                        <i class="icon-timer text-xs text-amber-500"></i> Durasi (Menit) <span class="text-danger">*</span>
+                    </label>
+                    <input
+                        type="number"
+                        id="schedule-duration"
+                        min="1"
+                        required
+                        class="w-full px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-800 font-mono focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400 transition"
+                    />
+                </div>
+
+                <div class="pt-2 border-t border-surface-100">
+                    <label class="flex items-center gap-3 cursor-pointer group">
+                        <div class="relative flex items-center">
+                            <input
+                                type="checkbox"
+                                id="schedule-retake"
+                                class="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-surface-300 transition-all checked:bg-primary-600 checked:border-primary-600 focus:outline-none"
+                            />
+                            <i class="icon-check absolute text-white opacity-0 peer-checked:opacity-100 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none text-xs"></i>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-sm font-bold text-surface-700 group-hover:text-primary-600 transition-colors">Izinkan Siswa Mengerjakan Ulang (Retake)</span>
+                            <span class="text-[10px] text-surface-400 leading-tight">Jika dicentang, sesi pengerjaan sebelumnya akan diarsip dan siswa bisa mulai dari awal.</span>
+                        </div>
+                    </label>
+                </div>
+
+                <!-- Error -->
+                <p id="schedule-error" class="hidden text-xs text-danger font-medium flex items-center gap-1">
+                    <i class="icon-alert-circle text-sm"></i>
+                    <span id="schedule-error-msg"></span>
+                </p>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-6 pb-6 flex gap-3">
+                <button
+                    onclick="closeScheduleModal()"
+                    class="flex-1 py-2.5 bg-surface-100 hover:bg-surface-200 text-surface-700 text-sm font-semibold rounded-xl transition border border-surface-200"
+                >
+                    Batal
+                </button>
+                <button
+                    id="schedule-save-btn"
+                    onclick="saveSchedule()"
+                    class="flex-1 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition shadow-md shadow-primary-600/20 flex items-center justify-center gap-2"
+                >
+                    <i class="icon-save text-base"></i>
+                    Simpan Jadwal
+                </button>
+            </div>
+        </div>
+    </div>
+</AdminLayout>
+
+<script define:vars={{ testId, isLocked }}>
+    // Tab Switching Logic
+    window.switchTab = (tab) => {
+        const blueprintBtn = document.getElementById("tab-blueprint-btn");
+        const settingsBtn = document.getElementById("tab-settings-btn");
+        const blueprintContent = document.getElementById("tab-blueprint-content");
+        const settingsContent = document.getElementById("tab-settings-content");
+
+        if (tab === "blueprint") {
+            blueprintBtn.classList.add("border-primary-600", "text-primary-600");
+            blueprintBtn.classList.remove("border-transparent", "text-surface-400");
+            settingsBtn.classList.remove("border-primary-600", "text-primary-600");
+            settingsBtn.classList.add("border-transparent", "text-surface-400");
+            blueprintContent.classList.remove("hidden");
+            settingsContent.classList.add("hidden");
+        } else {
+            settingsBtn.classList.add("border-primary-600", "text-primary-600");
+            settingsBtn.classList.remove("border-transparent", "text-surface-400");
+            blueprintBtn.classList.remove("border-primary-600", "text-primary-600");
+            blueprintBtn.classList.add("border-transparent", "text-surface-400");
+            settingsContent.classList.remove("hidden");
+            blueprintContent.classList.add("hidden");
+        }
+    };
+
+    // Settings Form Handling
+    const settingsForm = document.getElementById("edit-form");
+    settingsForm?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const errorAlert = document.getElementById("error-alert-settings");
+        const errorMsg = document.getElementById("error-msg-settings");
+        const submitBtn = document.getElementById("submit-settings-btn");
+        const btnText = document.getElementById("settings-btn-text");
+        const btnSpinner = document.getElementById("settings-btn-spinner");
+
+        if (errorAlert) errorAlert.classList.add("hidden");
+
+        const formData = new FormData(settingsForm);
+        const submitData = {
+            id: testId,
+            name: formData.get("name"),
+            scoreRight: parseFloat(formData.get("scoreRight")) || 0,
+            scoreWrong: 0,
+            scoreUnanswered: 0,
+            maxScore: parseFloat(formData.get("maxScore")) || 100,
+            showResult: formData.has("showResult"),
+            showDetail: formData.has("showDetail"),
+            detail: "",
+            tkaScores: {
+                pg: parseFloat(formData.get("tkaPg")) || 1,
+                esai: parseFloat(formData.get("tkaEsai")) || 100,
+                singkat: parseFloat(formData.get("tkaSingkat")) || 100,
+                jodoh: parseFloat(formData.get("tkaJodoh")) || 1,
+                ceklis: parseFloat(formData.get("tkaCeklis")) || 1,
+                bs: parseFloat(formData.get("tkaBs")) || 1,
+            }
+        };
+
+        submitBtn.disabled = true;
+        btnText.innerText = "Menyimpan...";
+        btnSpinner.classList.remove("hidden");
+
+        try {
+            const res = await fetch("/api/ujian", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(submitData),
+            });
+            const data = await res.json();
+
+            if (!data.status) {
+                errorMsg.innerText = data.message || "Penyimpanan ditolak.";
+                errorAlert.classList.remove("hidden");
+            } else {
+                // Success toast
+                const toast = document.createElement("div");
+                toast.className = "fixed bottom-4 right-4 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-fade-in";
+                toast.innerHTML = `<i class="icon-check-circle w-5 h-5"></i><span class="font-medium">Aturan berhasil disimpan!</span>`;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+            }
+        } catch (err) {
+            errorMsg.innerText = "Kesalahan jaringan.";
+            errorAlert.classList.remove("hidden");
+        } finally {
+            submitBtn.disabled = false;
+            btnText.innerText = "Simpan Perubahan Aturan";
+            btnSpinner.classList.add("hidden");
+        }
+    });
+
+    // API Handling for Blueprint Actions
+
+    // 1. Save Groups
+    const btnSaveGroups = document.getElementById("btn-save-groups");
+    btnSaveGroups?.addEventListener("click", async () => {
+        const form = document.forms.namedItem("group-form");
+        const formData = new FormData(form);
+        const selectedGroups = formData
+            .getAll("groups[]")
+            .map((val) => parseInt(val));
+
+        const spinner = document.getElementById("btn-save-groups-spinner");
+        btnSaveGroups.disabled = true;
+        spinner?.classList.remove("hidden");
+
+        try {
+            const res = await fetch(`/api/ujian/blueprint`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "sync_groups",
+                    testId,
+                    groups: selectedGroups,
+                }),
+            });
+            const data = await res.json();
+
+            if (data.status) {
+                alert("Hak Akses Grup berhasil diperbarui!");
+                window.location.reload();
+            } else {
+                alert("Gagal menyimpan grups: " + data.message);
+            }
+        } catch (e) {
+            alert("Kesalahan jaringan");
+        } finally {
+            btnSaveGroups.disabled = false;
+            spinner?.classList.add("hidden");
+        }
+    });
+
+    // Toggle Acak Soal visibility based on Tipe Soal selection
+    const questionTypeSelect = document.getElementById("questionType");
+    const shuffleContainer = document.getElementById("shuffleQuestions-container");
+    const shuffleSelect = document.getElementById("shuffleQuestions");
+
+    function handleTypeChange() {
+        const val = questionTypeSelect?.value;
+        if (val === "7") {
+            // Campuran: hide Acak Soal, force shuffle ON
+            if (shuffleContainer) shuffleContainer.style.display = "none";
+            if (shuffleSelect) shuffleSelect.value = "1";
+        } else {
+            if (shuffleContainer) shuffleContainer.style.display = "";
+        }
+    }
+    questionTypeSelect?.addEventListener("change", handleTypeChange);
+    handleTypeChange(); // run on page load
+
+    // 2. Add Topic Set
+    const formAddTopic = document.getElementById("add-topic-form");
+    formAddTopic?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const topicId = parseInt(document.getElementById("topicId").value);
+        const questionCount = parseInt(
+            document.getElementById("questionCount").value,
+        );
+        const shuffleQuestions =
+            document.getElementById("shuffleQuestions").value === "1";
+        
+        const durationMinutes = parseInt(document.getElementById("durationMinutes").value) || 60;
+        
+        const bDate = document.getElementById("beginTime-date").value;
+        const bHour = document.getElementById("beginTime-hour").value;
+        const bMin = document.getElementById("beginTime-min").value;
+        const beginTime = bDate ? `${bDate}T${bHour}:${bMin}:00` : null;
+
+        const eDate = document.getElementById("endTime-date").value;
+        const eHour = document.getElementById("endTime-hour").value;
+        const eMin = document.getElementById("endTime-min").value;
+        const endTime = eDate ? `${eDate}T${eHour}:${eMin}:00` : null;
+
+        if (!topicId || !questionCount || !durationMinutes) return;
+
+        try {
+            // Validate if question count exceeds bank soal
+            const res = await fetch(`/api/ujian/blueprint`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    testId,
+                    topicId,
+                    questionCount,
+                    questionType: parseInt(document.getElementById("questionType").value) || 1,
+                    shuffleQuestions,
+                    shuffleAnswers: true,
+                    durationMinutes,
+                    beginTime,
+                    endTime,
+                    scoreRightOverride: document.getElementById("scoreRightOverride").value,
+                    scoreWrongOverride: document.getElementById("scoreWrongOverride").value
+                }),
+            });
+
+            const data = await res.json();
+            if (data.status) {
+                window.location.reload();
+            } else {
+                alert(data.message || "Gagal menambahkan topik.");
+            }
+        } catch (error) {
+            alert("Kesalahan menghubungkan ke server.");
+        }
+    });
+
+    // 3. Remove Topic Set
+    window.removeTopicSet = async (setId) => {
+        if (!confirm("Hapus komposisi topik ini dari ujian?")) return;
+
+        try {
+            const res = await fetch(`/api/ujian/blueprint`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ testId, topicSetId: setId }),
+            });
+
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                alert("Gagal menghapus komponen topik. Mohon coba lagi.");
+            }
+        } catch (e) {
+            alert("Kesalahan jaringan saat menghapus topik.");
+        }
+    };
+
+    // 4. Schedule Modal
+    const scheduleModal = document.getElementById("schedule-modal");
+    const scheduleModalContent = document.getElementById("schedule-modal-content");
+
+    window.openScheduleModal = (id, topicName, isoStringStart, isoStringEnd, durationMinutes) => {
+        document.getElementById("schedule-topic-set-id").value = id;
+        document.getElementById("schedule-topic-name").textContent = topicName;
+        
+        // Handle Begin Time
+        if (isoStringStart) {
+            const dt = new Date(isoStringStart);
+             // Format for local date input (YYYY-MM-DD)
+            const dateStr = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+            document.getElementById("schedule-begin-date").value = dateStr;
+            document.getElementById("schedule-begin-hour").value = String(dt.getHours()).padStart(2, '0');
+            document.getElementById("schedule-begin-min").value = String(dt.getMinutes()).padStart(2, '0');
+        } else {
+            document.getElementById("schedule-begin-date").value = "";
+            document.getElementById("schedule-begin-hour").value = "00";
+            document.getElementById("schedule-begin-min").value = "00";
+        }
+
+        // Handle End Time
+        if (isoStringEnd) {
+            const dt = new Date(isoStringEnd);
+            const dateStr = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+            document.getElementById("schedule-end-date").value = dateStr;
+            document.getElementById("schedule-end-hour").value = String(dt.getHours()).padStart(2, '0');
+            document.getElementById("schedule-end-min").value = String(dt.getMinutes()).padStart(2, '0');
+        } else {
+            document.getElementById("schedule-end-date").value = "";
+            document.getElementById("schedule-end-hour").value = "00";
+            document.getElementById("schedule-end-min").value = "00";
+        }
+
+        document.getElementById("schedule-duration").value = durationMinutes || 60;
+        document.getElementById("schedule-retake").checked = false;
+
+        const errEl = document.getElementById("schedule-error");
+        errEl?.classList.add("hidden");
+
+        scheduleModal.classList.remove("hidden");
+        scheduleModal.classList.add("flex");
+        document.body.style.overflow = "hidden";
+
+        setTimeout(() => {
+            scheduleModalContent.classList.remove("scale-95", "opacity-0");
+            scheduleModalContent.classList.add("scale-100", "opacity-100");
+        }, 10);
+    };
+
+    window.closeScheduleModal = () => {
+        scheduleModalContent.classList.remove("scale-100", "opacity-100");
+        scheduleModalContent.classList.add("scale-95", "opacity-0");
+        document.body.style.overflow = "";
+        setTimeout(() => {
+            scheduleModal.classList.add("hidden");
+            scheduleModal.classList.remove("flex");
+        }, 200);
+    };
+
+    window.saveSchedule = async () => {
+        const topicSetId = parseInt(document.getElementById("schedule-topic-set-id").value);
+        const retake = document.getElementById("schedule-retake").checked;
+        
+        // Assemble Begin Time
+        const beginDate = document.getElementById("schedule-begin-date").value;
+        const beginHour = document.getElementById("schedule-begin-hour").value;
+        const beginMin = document.getElementById("schedule-begin-min").value;
+        const beginTime = beginDate ? `${beginDate}T${beginHour}:${beginMin}:00` : null;
+
+        // Assemble End Time
+        const endDate = document.getElementById("schedule-end-date").value;
+        const endHour = document.getElementById("schedule-end-hour").value;
+        const endMin = document.getElementById("schedule-end-min").value;
+        const endTime = endDate ? `${endDate}T${endHour}:${endMin}:00` : null;
+
+        const durationMinutes = parseInt(document.getElementById("schedule-duration").value);
+        const errEl = document.getElementById("schedule-error");
+        const errMsg = document.getElementById("schedule-error-msg");
+        const saveBtn = document.getElementById("schedule-save-btn");
+
+        errEl?.classList.add("hidden");
+
+        // Schedule Validation
+        if (beginTime && endTime && new Date(endTime).getTime() <= new Date(beginTime).getTime()) {
+            errMsg.textContent = "Batas Akhir (End) harus lebih lambat dari Mulai Tersedia (Begin).";
+            errEl?.classList.remove("hidden");
+            return;
+        }
+
+        if (endTime && new Date(endTime).getTime() <= new Date().getTime()) {
+            errMsg.textContent = "Batas Akhir (End) tidak boleh di masa lalu.";
+            errEl?.classList.remove("hidden");
+            return;
+        }
+
+        if (!durationMinutes || durationMinutes < 1) {
+            errMsg.textContent = "Durasi minimal 1 menit.";
+            errEl?.classList.remove("hidden");
+            return;
+        }
+
+        const originalHTML = saveBtn.innerHTML;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin inline-block"></span> Menyimpan...';
+
+        try {
+            const res = await fetch("/api/ujian/blueprint", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ topicSetId, testId, beginTime: beginTime || null, endTime: endTime || null, durationMinutes, retake }),
+            });
+            const data = await res.json();
+
+            if (data.status) {
+                window.closeScheduleModal();
+                window.location.reload();
+            } else {
+                errMsg.textContent = data.message || "Gagal menyimpan jadwal.";
+                errEl?.classList.remove("hidden");
+            }
+        } catch (e) {
+            errMsg.textContent = "Kesalahan jaringan. Coba lagi.";
+            errEl?.classList.remove("hidden");
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalHTML;
+        }
+    };
+
+    // Close modal on backdrop click
+    scheduleModal?.addEventListener("click", (e) => {
+        if (e.target === scheduleModal) window.closeScheduleModal();
+    });
+</script>

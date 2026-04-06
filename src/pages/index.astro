@@ -1,6 +1,18 @@
 ---
 import "../styles/global.css";
 import { verifyToken } from '../lib/auth';
+import { db } from '../db';
+import { configs } from '../db/schema';
+
+import { sql } from 'drizzle-orm';
+
+const allConfigs = await db.select({ 
+    key: configs.key, 
+    value: sql<string>`CASE WHEN ${configs.key} = 'school_logo' THEN '1' ELSE ${configs.value} END` 
+}).from(configs).all();
+const getConfig = (key: string) => allConfigs.find((c: any) => c.key === key)?.value || "";
+const hasLogo = !!getConfig("school_logo");
+const schoolName = getConfig("school_name") || "SAS CBT";
 
 // Hanya redirect ke admin jika session admin valid
 const adminToken = Astro.cookies.get('cbt_admin_session')?.value;
@@ -24,7 +36,8 @@ return Astro.redirect('/admin');
             href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
             rel="stylesheet"
         />
-        <title>Login Admin | SAS CBT</title>
+        <link rel="icon" href={hasLogo ? "/api/public/logo" : "/favicon.svg"} />
+        <title>Login Admin | {schoolName}</title>
     </head>
     <body
         class="h-full bg-gradient-to-br from-surface-900 via-surface-800 to-primary-900 flex items-center justify-center p-4"
@@ -36,14 +49,16 @@ return Astro.redirect('/admin');
             >
                 <!-- Header -->
                 <div class="text-center mb-8">
-                    <div
-                        class="w-14 h-14 bg-primary-500 rounded-xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-500/30"
-                    >
-                        <span class="text-white font-bold text-lg">CBT</span>
-                    </div>
-                    <h1 class="text-xl font-bold text-white">SAS CBT Admin</h1>
+                    {hasLogo ? (
+                        <img src="/api/public/logo" alt="Logo Sekolah" class="w-16 h-16 object-contain mx-auto mb-4 drop-shadow-md bg-white/10 rounded-xl p-2" />
+                    ) : (
+                        <div class="w-14 h-14 bg-primary-500 rounded-xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-500/30">
+                            <span class="text-white font-bold text-lg">CBT</span>
+                        </div>
+                    )}
+                    <h1 class="text-xl font-bold text-white">CBT Admin</h1>
                     <p class="text-sm text-white/50 mt-1">
-                        Masuk ke Dashboard Manajer
+                        {schoolName}
                     </p>
                 </div>
 

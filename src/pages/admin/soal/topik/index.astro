@@ -35,12 +35,18 @@ import AdminLayout from "../../../../layouts/AdminLayout.astro";
                 pengelompokan soal.
             </p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-col sm:flex-row gap-2 mt-4 sm:mt-0">
+            <a
+                href="/admin/soal/import"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white hover:bg-surface-50 text-surface-700 border border-surface-200 text-sm font-medium rounded-lg transition shadow-sm flex-shrink-0"
+            >
+                <i class="icon-upload-cloud w-4 h-4"></i> Smart Import
+            </a>
             <a
                 href="/admin/soal/topik/tambah"
-                class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition shadow-soft-xl shadow-primary-500/30 flex-shrink-0"
             >
-                <i class="icon-plus w-4 h-4 inline-block mr-1"></i> Tambah Topik
+                <i class="icon-plus w-4 h-4"></i> Tambah Topik
             </a>
         </div>
     </div>

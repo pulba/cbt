@@ -13,7 +13,7 @@ import {
     userGroups,
     configs,
 } from "../../../db/schema";
-import { eq, and, sum, max, inArray } from "drizzle-orm";
+import { eq, and, sum, inArray } from "drizzle-orm";
 
 const { id } = Astro.params;
 const user = Astro.locals.user;
@@ -86,6 +86,7 @@ if (sessionQuestionIds.length > 0) {
             orderIdx: testQuestionAnswers.orderIdx,
             ansId: questionAnswers.id,
             ansText: questionAnswers.text,
+            matchRight: questionAnswers.matchRight,
         })
         .from(testQuestionAnswers)
         .innerJoin(questionAnswers, eq(testQuestionAnswers.answerId, questionAnswers.id))
@@ -126,19 +127,42 @@ const spaState = JSON.stringify({
         name: testData.name,
         durationMinutes: Number(timingData?.durationMinutes ?? 60),
     },
-    questions: sessionQuestions.map((q) => ({
-        ...q,
-        answers: sessionAnswers
+    questions: sessionQuestions.map((q) => {
+        const answers = sessionAnswers
             .filter((a) => a.tqId === q.tqId)
-            .sort((a, b) => a.orderIdx - b.orderIdx),
-    })),
+            .sort((a, b) => a.orderIdx - b.orderIdx);
+            
+        let rightOptions: string[] = [];
+        // Extract right options for Menjodohkan
+        if (q.qType === 4) {
+            rightOptions = answers
+                .map(a => a.matchRight)
+                .filter(Boolean)
+                .sort(() => Math.random() - 0.5);
+        }
+        
+        return {
+            ...q,
+            answers,
+            rightOptions
+        };
+    }),
 });
 
 const totalQuestions = sessionQuestions.length;
-const studentName = userProfile?.firstName || user.username;
+const studentName = userProfile?.firstName || userProfile?.username || "Student";
 ---
 
 <StudentLayout title={`Ujian - ${testData.name}`}>
+    <!-- Highlighting for code chunks -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
+    <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <!-- KaTeX for math formulas -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
+    <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+    <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
     <script id="exam-data" type="application/json" set:html={spaState} />
 
     <!-- Full Screen Exam UI -->
@@ -163,7 +187,7 @@ const studentName = userProfile?.firstName || user.username;
                 <div class="flex items-center gap-2">
                     <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
                         <span class="text-[10px] text-slate-400 hidden sm:block font-medium">Soal</span>
-                        <span class="text-sm font-black text-slate-800 font-mono"><span id="header-q-num">1</span><span class="text-slate-300 font-light">/{totalQuestions}</span></span>
+                        <span class="text-sm font-black text-slate-800 font-mono"><span id="header-q-num">1</span><span id="header-total-num" class="text-slate-300 font-light">/{totalQuestions}</span></span>
                     </div>
                     <div id="sync-status" class="flex items-center gap-1 px-2 text-[10px] font-black uppercase tracking-widest text-emerald-500 transition-opacity duration-300 opacity-0">
                         <i class="icon-refresh-cw w-3 h-3 animate-spin"></i>
@@ -212,11 +236,11 @@ const studentName = userProfile?.firstName || user.username;
 
             <!-- ─── QUESTION PANEL ─── -->
             <div class="flex-1 overflow-y-auto" id="question-panel-scroll">
-                <div class="max-w-3xl mx-auto px-3 sm:px-6 lg:px-8 py-5 pb-24 sm:pb-8">
+                <div class="max-w-4xl mx-auto px-3 sm:px-6 lg:px-8 py-5 pb-24 sm:pb-8">
 
                     <!-- Question header -->
-                    <div class="flex items-center justify-between mb-5 gap-3">
-                        <div class="flex items-center gap-3">
+                    <div id="question-header" class="flex items-center justify-end mb-5 gap-3">
+                        <div class="hidden items-center gap-3">
                             <div id="q-badge"
                                 class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-primary-600 text-white flex items-center justify-center text-base sm:text-lg font-black font-mono shadow-md shadow-primary-600/25 shrink-0">
                                 1
@@ -224,7 +248,7 @@ const studentName = userProfile?.firstName || user.username;
                             <div>
                                 <div class="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Soal Nomor</div>
                                 <div class="text-lg font-black text-slate-800 leading-tight font-mono">
-                                    <span id="q-num">1</span><span class="text-slate-300 text-sm font-light"> / {totalQuestions}</span>
+                                    <span id="q-num">1</span><span id="hero-total-num" class="text-slate-300 text-sm font-light"> / {totalQuestions}</span>
                                 </div>
                             </div>
                         </div>
@@ -241,8 +265,8 @@ const studentName = userProfile?.firstName || user.username;
                     </div>
 
                     <!-- Question text card -->
-                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7 mb-5">
-                        <div id="question-content" class="prose prose-sm sm:prose-base max-w-none text-slate-800 leading-relaxed">
+                    <div id="question-card" class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7 mb-5">
+                        <div id="question-content" class="prose prose-slate prose-sm sm:prose-base max-w-none text-slate-800 leading-relaxed font-medium">
                             <!-- Rendered by JS -->
                         </div>
                     </div>
@@ -296,7 +320,7 @@ const studentName = userProfile?.firstName || user.username;
                     <div class="text-right">
                         <div class="text-[10px] text-slate-400 leading-none">Terjawab</div>
                         <div class="text-sm font-black text-slate-800 leading-tight">
-                            <span id="answered-count">0</span><span class="text-slate-300 font-light text-xs">/{totalQuestions}</span>
+                            <span id="answered-count">0</span><span id="nav-total-num" class="text-slate-300 font-light text-xs">/{totalQuestions}</span>
                         </div>
                     </div>
                 </div>
@@ -342,8 +366,7 @@ const studentName = userProfile?.firstName || user.username;
 
 <style>
 /* Option hover - smooth left bar expansion */
-.opt-label { transition: all 0.12s ease; }
-.opt-label:active { transform: scale(0.995); }
+/* Option label */
 
 /* Timer warning pulse */
 #countdown-timer.warning { animation: timer-pulse 1s ease-in-out infinite; }
@@ -356,20 +379,22 @@ const studentName = userProfile?.firstName || user.username;
 
 <script>
 // ─── TYPES ───
-interface Answer { id: number; tqId: number; isSelected: boolean; orderIdx: number; ansId: number; ansText: string; }
-interface Question { tqId: number; orderIdx: number; isDoubtful: boolean; qId: number; qType: number; qText: string; qAudioPath: string | null; answerText: string | null; answers: Answer[]; }
+interface Answer { id: number; tqId: number; isSelected: boolean; orderIdx: number; ansId: number; ansText: string; matchRight?: string; }
+interface Question { tqId: number; orderIdx: number; isDoubtful: boolean; qId: number; qType: number; qText: string; qAudioPath: string | null; answerText: string | null; answers: Answer[]; rightOptions?: string[]; }
 interface State { session: { id: number; status: number }; test: { id: number; name: string; durationMinutes: number }; questions: Question[]; }
 
 // ─── STATE ───
 let state: State = { session: null as any, test: null as any, questions: [] };
 let cur = 0;
 let isSystemAction = false; // Flag to ignore blur during alerts/confirms
+let _matchFocus: { type: 'left' | 'right', id: string, tqId: number } | null = null; // for click-to-connect
 
 // ─── INIT ───
 document.addEventListener("DOMContentLoaded", () => {
     const raw = document.getElementById("exam-data")?.innerHTML;
     if (!raw) { alert("Gagal memuat data ujian."); return; }
     state = JSON.parse(raw);
+    updateTotalDisplay();
     render();
     renderGrid();
     updateProgress();
@@ -427,37 +452,59 @@ async function handleViolation() {
 }
 
 // ─── RENDER QUESTION ───
-function render() {
+function render(shouldScroll = true) {
     const q = state.questions[cur];
     if (!q) return;
 
     // Number badges
+    let blockStart = cur;
+    let blockEnd = cur;
+    if (q.qType === 6) {
+        while (blockStart > 0 && state.questions[blockStart - 1].qType === 6) blockStart--;
+        while (blockEnd < state.questions.length - 1 && state.questions[blockEnd + 1].qType === 6) blockEnd++;
+    }
+    
+    const numDisplay = (blockStart !== blockEnd) 
+        ? `${state.questions[blockStart].orderIdx}-${state.questions[blockEnd].orderIdx}` 
+        : q.orderIdx.toString();
+
     ["header-q-num", "q-num"].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.textContent = q.orderIdx.toString();
+        if (el) el.textContent = numDisplay;
     });
     const badge = document.getElementById("q-badge");
-    if (badge) badge.textContent = q.orderIdx.toString();
+    if (badge) badge.textContent = numDisplay;
 
-    // Flag button state
+    // Flag button state (hidden for clustered Type 6)
     const flagBtn = document.getElementById("flag-btn");
     if (flagBtn) {
-        flagBtn.className = q.isDoubtful
-            ? "flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition border border-amber-400 text-amber-600 bg-amber-50"
-            : "flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300 text-xs sm:text-sm font-bold transition whitespace-nowrap";
+        if (blockStart !== blockEnd) {
+            flagBtn.style.display = 'none'; // hide for clustered, flag per row instead
+        } else {
+            flagBtn.style.display = 'flex';
+            flagBtn.className = q.isDoubtful
+                ? "flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition border border-amber-400 text-amber-600 bg-amber-50"
+                : "flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300 text-xs sm:text-sm font-bold transition whitespace-nowrap";
+        }
     }
 
     // Question content
+    const contentCard = document.getElementById("question-card");
     const contentEl = document.getElementById("question-content");
-    if (contentEl) {
-        let html = q.qText || "<em class='text-slate-400'>Soal tidak tersedia</em>";
-        if (q.qAudioPath) {
-            html = `<div class="mb-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
-                <i class="icon-volume-2 text-primary-500 w-5 h-5 shrink-0"></i>
-                <audio controls src="${q.qAudioPath}" class="w-full h-9 accent-primary-600"></audio>
-            </div>` + html;
+    if (contentEl && contentCard) {
+        if (q.qType === 6) {
+            contentCard.style.display = "none";
+        } else {
+            contentCard.style.display = "block";
+            let html = q.qText || "<em class='text-slate-400'>Soal tidak tersedia</em>";
+            if (q.qAudioPath) {
+                html = `<div class="mb-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
+                    <i class="icon-volume-2 text-primary-500 w-5 h-5 shrink-0"></i>
+                    <audio controls src="${q.qAudioPath}" class="w-full h-9 accent-primary-600"></audio>
+                </div>` + html;
+            }
+            contentEl.innerHTML = html;
         }
-        contentEl.innerHTML = html;
     }
 
     // Answer options
@@ -466,55 +513,196 @@ function render() {
         const charMap = ["A", "B", "C", "D", "E", "F"];
         let html = "";
 
-        if (q.qType === 1) {
+        if (q.qType === 1 || q.qType === 5) {
             if (q.answers.length === 0) {
                 html = `<div class="p-5 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm font-medium flex items-center gap-2">
                     <i class="icon-alert-triangle w-4 h-4 shrink-0"></i>
                     Pilihan jawaban belum tersedia. Hubungi pengawas.
                 </div>`;
             } else {
+                html += `<div class="grid grid-cols-1 md:grid-cols-2 gap-3">`;
                 q.answers.forEach((ans, idx) => {
                     const ch = charMap[idx] ?? String(idx + 1);
                     const sel = ans.isSelected;
+                    const type = q.qType === 1 ? "radio" : "checkbox";
+                    const isCheckbox = q.qType === 5;
+                    const accentColor = isCheckbox ? "emerald" : "primary";
+                    const activeClasses = isCheckbox 
+                        ? "border-emerald-500 shadow-md shadow-emerald-100" 
+                        : "border-primary-500 shadow-md shadow-primary-100";
+                    const bgAccent = isCheckbox ? "bg-emerald-600 border-emerald-500" : "bg-primary-600 border-primary-500";
+                    const contentAccent = isCheckbox ? "bg-emerald-50/50" : "bg-primary-50/50";
+                    const onChange = isCheckbox ? `toggleAnswer(${q.tqId}, ${ans.ansId})` : `saveAnswer(${q.tqId}, ${ans.ansId})`;
+                    
                     html += `
                     <label class="opt-label flex items-stretch rounded-xl border-2 cursor-pointer overflow-hidden
-                        ${sel ? "border-primary-500 shadow-md shadow-primary-100" : "border-slate-200 hover:border-primary-300 hover:shadow-sm"}">
+                        ${sel ? activeClasses : "border-slate-200 hover:border-slate-300 hover:shadow-sm"}">
                         <!-- Letter -->
-                        <div class="w-11 sm:w-12 flex items-center justify-center shrink-0 border-r-2
-                            ${sel ? "bg-primary-600 border-primary-500" : "bg-slate-50 border-slate-200"}
-                            transition-colors">
-                            <span class="text-sm font-black ${sel ? "text-white" : "text-slate-400"}">${ch}</span>
+                        <div class="w-11 flex items-center justify-center shrink-0 border-r-2
+                            ${sel ? bgAccent : "bg-slate-50 border-slate-200"}">
+                            <span class="text-xs font-black ${sel ? "text-white" : "text-slate-400"}">${ch}</span>
                         </div>
                         <!-- Content -->
-                        <div class="flex items-start gap-3 flex-1 px-4 py-3.5 ${sel ? "bg-primary-50/50" : "bg-white"}">
+                        <div class="flex items-start gap-3 flex-1 px-4 py-3 ${sel ? contentAccent : "bg-white"}">
                             <input
-                                type="radio"
-                                name="q${q.tqId}"
+                                type="${type}"
+                                ${q.qType === 1 ? `name="q${q.tqId}"` : ""}
                                 value="${ans.ansId}"
                                 ${sel ? "checked" : ""}
-                                onchange="saveAnswer(${q.tqId}, ${ans.ansId})"
-                                class="mt-0.5 w-4 h-4 flex-shrink-0 accent-primary-600">
-                            <div class="flex-1 text-slate-800 text-sm sm:text-base leading-relaxed">${ans.ansText}</div>
+                                onchange="${onChange}"
+                                class="mt-0.5 w-4 h-4 flex-shrink-0 accent-slate-900">
+                            <div class="flex-1 text-slate-800 text-sm leading-relaxed">${ans.ansText}</div>
                         </div>
                     </label>`;
                 });
+                html += `</div>`;
             }
+        } else if (q.qType === 6) {
+            let rowsHtml = "";
+            for (let i = blockStart; i <= blockEnd; i++) {
+                const bq = state.questions[i];
+                const qText = bq.qText || "<em class='text-slate-400'>Soal tidak tersedia</em>";
+                const ansBenar = bq.answers.find((a: any) => a.ansText.toLowerCase() === 'benar');
+                const ansSalah = bq.answers.find((a: any) => a.ansText.toLowerCase() === 'salah');
+                const opt1 = ansBenar || bq.answers[0];
+                const opt2 = ansSalah || bq.answers[1];
+                
+                let audioHtml = "";
+                if (bq.qAudioPath) {
+                    audioHtml = `<div class="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
+                        <i class="icon-volume-2 text-primary-500 w-5 h-5 shrink-0"></i>
+                        <audio controls src="${bq.qAudioPath}" class="w-full h-9 accent-primary-600"></audio>
+                    </div>`;
+                }
+
+                rowsHtml += `
+                <div class="px-4 sm:px-6 py-5 sm:py-6 flex flex-col sm:flex-row sm:items-center justify-between hover:bg-slate-50/50 transition-colors gap-6 sm:gap-8 border-b border-slate-100 last:border-0 relative">
+                    <!-- Absolute flag/number badge to indicate question number -->
+                    <div onclick="toggleFlagSpecific(${i})" class="absolute top-4 sm:top-6 left-1 sm:left-2 w-6 h-6 rounded-full ${bq.isDoubtful ? 'bg-amber-100 text-amber-500 ring-2 ring-amber-200' : 'bg-slate-100 text-slate-500 hover:bg-amber-50'} text-[10px] font-bold flex items-center justify-center cursor-pointer transition shadow-sm" title="Tandai Ragu-ragu (Soal ${bq.orderIdx})">
+                        ${bq.orderIdx}
+                    </div>
+                    
+                    <div class="flex-1 pl-6 sm:pl-8">
+                        ${audioHtml}
+                        <div class="text-sm sm:text-base text-slate-800 leading-relaxed font-semibold prose prose-sm max-w-none">
+                            ${qText}
+                        </div>
+                    </div>
+                    
+                    <div class="flex shrink-0 gap-4 sm:gap-8 justify-center sm:justify-end pr-2 sm:pr-4">
+                        <label class="relative group flex items-center justify-center p-3 sm:p-4 rounded-xl cursor-pointer ${opt1?.isSelected ? 'bg-primary-50 border-2 border-primary-500 shadow-sm ring-2 ring-primary-50' : 'bg-slate-50 border-2 border-slate-200 hover:border-primary-300 hover:bg-white'} transition-all">
+                            <input type="radio" name="bs${bq.tqId}" onchange="saveAnswer(${bq.tqId}, ${opt1?.ansId})" ${opt1?.isSelected ? 'checked' : ''} class="w-5 h-5 sm:w-6 sm:h-6 accent-primary-600 cursor-pointer">
+                        </label>
+                        <label class="relative group flex items-center justify-center p-3 sm:p-4 rounded-xl cursor-pointer ${opt2?.isSelected ? 'bg-rose-50 border-2 border-rose-500 shadow-sm ring-2 ring-rose-50' : 'bg-slate-50 border-2 border-slate-200 hover:border-rose-300 hover:bg-white'} transition-all">
+                            <input type="radio" name="bs${bq.tqId}" onchange="saveAnswer(${bq.tqId}, ${opt2?.ansId})" ${opt2?.isSelected ? 'checked' : ''} class="w-5 h-5 sm:w-6 sm:h-6 accent-rose-600 cursor-pointer">
+                        </label>
+                    </div>
+                </div>`;
+            }
+
+            html = `
+            <div class="border-2 border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm mt-2">
+                <!-- Header -->
+                <div class="bg-slate-50 border-b-2 border-slate-200 px-4 sm:px-6 py-4 flex items-center justify-between text-xs font-black text-slate-500 uppercase tracking-widest gap-6 sm:gap-8">
+                    <div class="flex-1 text-center sm:text-left pl-6 sm:pl-8">PERNYATAAN</div>
+                    <div class="flex shrink-0 gap-4 sm:gap-8 pr-2 sm:pr-4">
+                        <div class="w-11 sm:w-14 text-center text-primary-700">BENAR</div>
+                        <div class="w-11 sm:w-14 text-center text-rose-700">SALAH</div>
+                    </div>
+                </div>
+                
+                <!-- Rows container -->
+                <div class="flex flex-col">
+                    ${rowsHtml}
+                </div>
+            </div>`;
         } else if (q.qType === 2 || q.qType === 3) {
             html = `
             <div class="space-y-3">
                 <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">Jawaban Anda:</label>
                 <textarea
                     id="essay-input"
-                    class="w-full p-4 border-2 border-slate-200 rounded-xl text-sm text-slate-800 focus:border-primary-500 focus:outline-none resize-none bg-white transition min-h-[160px]"
+                    class="w-full p-4 border-2 border-slate-200 rounded-xl text-sm text-slate-800 font-medium focus:border-primary-500 focus:outline-none resize-none bg-slate-50 transition min-h-[160px]"
                     placeholder="Ketik jawaban Anda di sini..."
                     onblur="saveTextAnswer(${q.tqId}, this.value)">${q.answerText || ""}</textarea>
                 <div class="text-[10px] text-slate-400 italic flex items-center gap-1">
                     <i class="icon-info w-3 h-3"></i> Jawaban otomatis tersimpan saat Anda berpindah soal atau klik di luar area input.
                 </div>
             </div>`;
+        } else if (q.qType === 4) {
+            let saved: any = {}; try { saved = JSON.parse(q.answerText || '{}'); } catch(e){}
+            const left = q.answers.map((ans: any) => {
+                const isSel = _matchFocus && _matchFocus.type === 'left' && _matchFocus.id == ans.ansId;
+                const isSaved = saved[ans.ansId];
+                return `
+                <div onclick="matchClick('left', '${ans.ansId}', ${q.tqId})" class="flex items-center gap-3 py-2 cursor-pointer group">
+                    <div class="flex-1 bg-white border-2 ${isSel ? 'border-primary-500 ring-4 ring-primary-50 shadow-lg translate-x-1' : (isSaved ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100 group-hover:border-primary-200')} rounded-2xl px-5 py-4 text-sm font-bold text-slate-700 shadow-sm transition-all duration-200">${ans.ansText}</div>
+                    <div class="left-dot w-5 h-5 rounded-full border-4 border-white shadow-sm ring-2 transition-all duration-300 ${isSel ? 'ring-primary-500 bg-primary-500 scale-125' : (isSaved ? 'ring-emerald-500 bg-emerald-500' : 'ring-slate-200 bg-slate-100 group-hover:ring-primary-300 group-hover:bg-primary-100')}" data-left-id="${ans.ansId}"></div>
+                </div>`;
+            }).join('');
+            
+            const right = (q.rightOptions || []).map((opt: string) => {
+                const optEsc = opt.replace(/'/g, "\\'");
+                const isSel = _matchFocus && _matchFocus.type === 'right' && _matchFocus.id === opt;
+                const isSaved = Object.values(saved).includes(opt);
+                return `
+                <div onclick="matchClick('right', '${optEsc}', ${q.tqId})" class="flex items-center gap-3 py-2 cursor-pointer group">
+                    <div class="right-dot w-5 h-5 rounded-full border-4 border-white shadow-sm ring-2 transition-all duration-300 ${isSel ? 'ring-primary-500 bg-primary-500 scale-125' : (isSaved ? 'ring-emerald-500 bg-emerald-500' : 'ring-slate-200 bg-slate-100 group-hover:ring-primary-300 group-hover:bg-primary-100')}" data-right-val="${opt.replace(/"/g, '&quot;')}"></div>
+                    <div class="flex-1 bg-white border-2 ${isSel ? 'border-primary-500 ring-4 ring-primary-50 shadow-lg -translate-x-1' : (isSaved ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100 group-hover:border-primary-200')} rounded-2xl px-5 py-4 text-sm font-bold text-slate-700 text-right shadow-sm transition-all duration-200">${opt}</div>
+                </div>`;
+            }).join('');
+
+            html = `
+            <div class="mb-4">
+                <div class="flex items-center gap-2 px-4 py-2 bg-primary-50 border border-primary-100 rounded-xl mb-6">
+                    <i class="icon-info w-4 h-4 text-primary-500"></i>
+                    <p class="text-[11px] font-medium text-primary-700 leading-tight">
+                        <span class="font-bold">Cara Menjawab:</span> Klik kotak di kolom kiri, lalu klik kotak pasangannya di kolom kanan. Klik kembali pada kotak yang sudah terhubung untuk membatalkan.
+                    </p>
+                </div>
+                
+                <div id="matching-container-${q.tqId}" class="relative p-2 sm:p-4 min-h-[400px]">
+                    <svg id="matching-svg-${q.tqId}" class="absolute inset-0 w-full h-full pointer-events-none z-10"></svg>
+                    
+                    <div class="grid grid-cols-2 gap-x-12 sm:gap-x-24 relative z-20">
+                        <!-- Left Column (Questions) -->
+                        <div class="space-y-4">
+                            <div class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">Pernyataan</div>
+                            ${left}
+                        </div>
+                        
+                        <!-- Right Column (Answers) -->
+                        <div class="space-y-4">
+                            <div class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">Jawaban</div>
+                            ${right}
+                        </div>
+                    </div>
+
+                    <div class="mt-12 pt-6 border-t border-slate-100 flex justify-end">
+                        <button onclick="clearMatching(${q.tqId})" class="group flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-rose-50 transition-all duration-200">
+                            <i class="icon-trash-2 w-4 h-4 text-rose-400 group-hover:text-rose-600"></i>
+                            <span class="text-[11px] font-bold text-rose-400 group-hover:text-rose-600 uppercase tracking-widest">Reset Semua Garis</span>
+                        </button>
+                    </div>
+                </div>
+            </div>`;
         }
 
         optsEl.innerHTML = html;
+
+        setTimeout(() => {
+            const win = window as any;
+            if (win.MathJax && win.MathJax.typesetPromise) {
+                win.MathJax.typesetPromise();
+            } else if (win.renderMathInElement) {
+                win.renderMathInElement(optsEl, { delimiters: [{left:'$$', right:'$$', display:true}, {left:'$', right:'$', display:false}], throwOnError:false });
+                const qContent = document.getElementById('question-content');
+                // Only render Math in content if it was actually replaced
+                if (qContent) win.renderMathInElement(qContent, { delimiters: [{left:'$$', right:'$$', display:true}, {left:'$', right:'$', display:false}, {left:'\\(', right:'\\)', display:false}, {left:'\\[', right:'\\]', display:true}], throwOnError:false });
+            }
+            if (win.hljs) optsEl.querySelectorAll('pre').forEach((b:any) => win.hljs.highlightElement(b));
+            if (q.qType === 4) renderMatching(q.tqId);
+        }, 50);
     }
 
     // Nav button states
@@ -526,7 +714,51 @@ function render() {
     updateNextButton();
 
     // Scroll question area to top
-    document.getElementById("question-panel-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+    if (shouldScroll) {
+        document.getElementById("question-panel-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+    }
+}
+
+// ─── NAV BLOCKS LOGIC ───
+// To support grouping Type 6 questions into a single table/navigation button
+function getQuestionBlocks() {
+    let blocks = [];
+    let i = 0;
+    while (i < state.questions.length) {
+        if (state.questions[i].qType === 6) {
+            let start = i;
+            let end = i;
+            while (end + 1 < state.questions.length && state.questions[end + 1].qType === 6) {
+                end++;
+            }
+            blocks.push({
+                start, end,
+                label: start !== end ? `${state.questions[start].orderIdx}-${state.questions[end].orderIdx}` : state.questions[start].orderIdx.toString(),
+                isGroup: true
+            });
+            i = end + 1;
+        } else {
+            blocks.push({
+                start: i, end: i,
+                label: state.questions[i].orderIdx.toString(),
+                isGroup: false
+            });
+            i++;
+        }
+    }
+    return blocks;
+}
+
+// Update total counters
+function updateTotalDisplay() {
+    const blocks = getQuestionBlocks();
+    const len = blocks.length;
+    ['header-total-num', 'nav-total-num'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = `/${len}`;
+    });
+    const heroEl = document.getElementById("hero-total-num");
+    if (heroEl) heroEl.textContent = ` / ${len}`;
 }
 
 // ─── RENDER NAV GRID ───
@@ -534,45 +766,76 @@ function renderGrid() {
     const grid = document.getElementById("nav-grid");
     if (!grid) return;
 
-    let answered = 0;
+    let answeredBlocks = 0;
     let html = "";
+    const blocks = getQuestionBlocks();
 
-    state.questions.forEach((q, idx) => {
-        const isAns = q.qType === 1 
-            ? q.answers.some(a => a.isSelected)
-            : !!(q.answerText && q.answerText.trim());
+    blocks.forEach(block => {
+        let isBlockAns = true; 
+        let isBlockDoubtful = false;
         
-        if (isAns) answered++;
+        for (let i = block.start; i <= block.end; i++) {
+            const q = state.questions[i];
+            if (q.isDoubtful) isBlockDoubtful = true;
+            
+            let isAns = false;
+            if (q.qType === 1 || q.qType === 5 || q.qType === 6) {
+                isAns = q.answers.some((a: any) => a.isSelected);
+            } else if (q.qType === 4) {
+                try { isAns = Object.values(JSON.parse(q.answerText || "{}")).some(v => v !== ""); } catch(e) { isAns = false; }
+            } else {
+                isAns = !!(q.answerText && q.answerText.trim());
+            }
+            if (!isAns) isBlockAns = false;
+        }
+        
+        if (isBlockAns) answeredBlocks++;
 
-        let cls = "w-full aspect-square rounded-lg font-bold font-mono text-xs transition-all duration-150 border ";
-        if (q.isDoubtful) cls += "bg-amber-400 border-amber-400 text-slate-900";
-        else if (isAns) cls += "bg-primary-600 border-primary-600 text-white";
+        let cls = "w-full aspect-[2/1] sm:aspect-square flex items-center justify-center rounded-lg font-bold font-mono text-xs transition-all duration-150 border ";
+        if (isBlockDoubtful) cls += "bg-amber-400 border-amber-400 text-slate-900";
+        else if (isBlockAns) cls += "bg-primary-600 border-primary-600 text-white";
         else cls += "bg-white border-slate-200 text-slate-500 hover:border-primary-400 hover:bg-primary-50";
-        if (idx === cur) cls += " ring-2 ring-offset-1 ring-primary-500 scale-110 z-10";
+        
+        if (cur >= block.start && cur <= block.end) cls += " ring-2 ring-offset-1 ring-primary-500 scale-110 z-10";
 
-        html += `<button onclick="jumpTo(${idx})" class="${cls}">${q.orderIdx}</button>`;
+        html += `<button onclick="jumpTo(${block.start})" class="${cls}">${block.label}</button>`;
     });
 
     grid.innerHTML = html;
 
     const countEl = document.getElementById("answered-count");
-    if (countEl) countEl.textContent = answered.toString();
+    if (countEl) countEl.textContent = answeredBlocks.toString();
 
     const badge = document.getElementById("nav-badge");
     if (badge) {
-        badge.textContent = answered.toString();
-        badge.classList.toggle("hidden", answered === 0);
+        badge.textContent = answeredBlocks.toString();
+        badge.classList.toggle("hidden", answeredBlocks === 0);
     }
 }
 
 // ─── PROGRESS ───
 function updateProgress() {
-    const total = state.questions.length;
-    const ans = state.questions.filter(q => {
-        return q.qType === 1 
-            ? q.answers.some(a => a.isSelected)
-            : !!(q.answerText && q.answerText.trim());
-    }).length;
+    const blocks = getQuestionBlocks();
+    const total = blocks.length;
+    
+    let ans = 0;
+    blocks.forEach(block => {
+        let isBlockAns = true;
+        for (let i = block.start; i <= block.end; i++) {
+            const q = state.questions[i];
+            let isAns = false;
+            if (q.qType === 1 || q.qType === 5 || q.qType === 6) {
+                isAns = q.answers.some((a: any) => a.isSelected);
+            } else if (q.qType === 4) {
+                try { isAns = Object.values(JSON.parse(q.answerText || "{}")).some(v => v !== ""); } catch(e) { isAns = false; }
+            } else {
+                isAns = !!(q.answerText && q.answerText.trim());
+            }
+            if (!isAns) isBlockAns = false;
+        }
+        if (isBlockAns) ans++;
+    });
+
     const pct = total > 0 ? (ans / total) * 100 : 0;
     const bar = document.getElementById("progress-bar");
     const side = document.getElementById("side-progress");
@@ -592,13 +855,18 @@ function updateProgress() {
 // ─── SMART NEXT BUTTON ───
 function updateNextButton() {
     const total = state.questions.length;
-    const isLast = cur === total - 1;
+    let blockEnd = cur;
+    if (state.questions[cur] && state.questions[cur].qType === 6) {
+        while (blockEnd < total - 1 && state.questions[blockEnd + 1].qType === 6) blockEnd++;
+    }
+    const isLast = blockEnd === total - 1;
 
-    const unanswered = state.questions.filter(q => {
-        if (q.qType === 1) return !q.answers.some(a => a.isSelected);
+    const unanswered = state.questions.filter((q: any) => {
+        if (q.qType === 1 || q.qType === 5 || q.qType === 6) return !q.answers.some((a: any) => a.isSelected);
+        if (q.qType === 4) { try { return !Object.values(JSON.parse(q.answerText || "{}")).some(v => v !== ""); } catch(e) { return true; } }
         return !(q.answerText && q.answerText.trim());
     }).length;
-    const doubtful = state.questions.filter(q => q.isDoubtful).length;
+    const doubtful = state.questions.filter((q: any) => q.isDoubtful).length;
     const allClear = unanswered === 0 && doubtful === 0;
 
     ["btn-next", "btn-next-m"].forEach(id => {
@@ -644,42 +912,115 @@ function updateNextButton() {
 
 // ─── SMART NEXT / FINISH ───
 (window as any).smartNext = () => {
+    let blockEnd = cur;
+    if (state.questions[cur].qType === 6) {
+        while (blockEnd < state.questions.length - 1 && state.questions[blockEnd + 1].qType === 6) blockEnd++;
+    }
+    
     const total = state.questions.length;
-    if (cur < total - 1) {
-        // Navigate to next question
-        cur++;
+    if (blockEnd < total - 1) {
+        // Navigate to next question (jump past the block)
+        cur = blockEnd + 1;
         render();
         renderGrid();
     } else {
         // On last question — act as Selesai
-        const unanswered = state.questions.filter(q => {
-            if (q.qType === 1) return !q.answers.some(a => a.isSelected);
+        const unanswered = state.questions.filter((q: any) => {
+            if (q.qType === 1 || q.qType === 5 || q.qType === 6) return !q.answers.some((a: any) => a.isSelected);
+            if (q.qType === 4) { try { return !Object.values(JSON.parse(q.answerText || "{}")).some(v => v !== ""); } catch(e) { return true; } }
             return !(q.answerText && q.answerText.trim());
         }).length;
-        const doubtful = state.questions.filter(q => q.isDoubtful).length;
+        const doubtful = state.questions.filter((q: any) => q.isDoubtful).length;
         if (unanswered === 0 && doubtful === 0) {
             (window as any).finishTest();
         }
-        // If disabled, do nothing (button is disabled anyway)
     }
 };
 
 (window as any).navigateItem = (offset: number) => {
-    const n = cur + offset;
-    if (n >= 0 && n < state.questions.length) {
-        cur = n;
+    let newCur = cur;
+    if (offset > 0) {
+        if (state.questions[cur].qType === 6) {
+            let blockEnd = cur;
+            while (blockEnd < state.questions.length - 1 && state.questions[blockEnd + 1].qType === 6) blockEnd++;
+            newCur = blockEnd + 1;
+        } else {
+            newCur += offset;
+        }
+    } else if (offset < 0) {
+        if (cur > 0 && state.questions[cur - 1].qType === 6) {
+            let blockStart = cur - 1;
+            while (blockStart > 0 && state.questions[blockStart - 1].qType === 6) blockStart--;
+            newCur = blockStart;
+        } else {
+            newCur += offset;
+        }
+    }
+    
+    if (newCur >= 0 && newCur < state.questions.length) {
+        cur = newCur;
         render();
         renderGrid();
     }
 };
 
+(window as any).toggleFlagSpecific = (idx: number) => {
+    const q = state.questions[idx];
+    q.isDoubtful = !q.isDoubtful;
+    render(false);
+    renderGrid();
+    updateNextButton();
 (window as any).toggleFlag = () => {
     const q = state.questions[cur];
     q.isDoubtful = !q.isDoubtful;
-    render();
+    render(false);
     renderGrid();
     updateNextButton();
     (window as any).bgFetch("/api/peserta/simpan-jawaban", { action: "flag", testQuestionId: q.tqId, isDoubtful: q.isDoubtful });
+};
+
+(window as any).toggleAnswer = (tqId: number, ansId: number) => {
+    const q = state.questions.find((x: any) => x.tqId === tqId);
+    if (!q) return;
+    const a = q.answers.find((x: any) => x.ansId === ansId);
+    if (a) a.isSelected = !a.isSelected;
+    
+    // Manual DOM update
+    const isCb = true;
+    const activeClasses = isCb ? ["border-emerald-500", "shadow-md", "shadow-emerald-100"] : ["border-primary-500", "shadow-md", "shadow-primary-100"];
+    const inactiveClasses = ["border-slate-200", "hover:border-slate-300", "hover:shadow-sm"];
+    const bgAccent = isCb ? ["bg-emerald-600", "border-emerald-500"] : ["bg-primary-600", "border-primary-500"];
+    const bgInactive = ["bg-slate-50", "border-slate-200"];
+    const contentAccent = isCb ? "bg-emerald-50/50" : "bg-primary-50/50";
+    
+    q.answers.forEach((ans:any) => {
+        const input = document.querySelector(`input[value="${ans.ansId}"]`) as HTMLInputElement | null;
+        if (!input) return;
+        input.checked = ans.isSelected;
+        const label = input.closest('label');
+        if (!label) return;
+        
+        const letterBox = label.firstElementChild;
+        const contentBox = label.lastElementChild;
+        const letterText = letterBox?.firstElementChild;
+        
+        if (ans.isSelected) {
+            label.classList.remove(...inactiveClasses); label.classList.add(...activeClasses);
+            if (letterBox) { letterBox.classList.remove(...bgInactive); letterBox.classList.add(...bgAccent); }
+            if (letterText) { letterText.classList.remove("text-slate-400"); letterText.classList.add("text-white"); }
+            if (contentBox) { contentBox.classList.remove("bg-white"); contentBox.classList.add(contentAccent); }
+        } else {
+            label.classList.remove(...activeClasses); label.classList.add(...inactiveClasses);
+            if (letterBox) { letterBox.classList.remove(...bgAccent); letterBox.classList.add(...bgInactive); }
+            if (letterText) { letterText.classList.remove("text-white"); letterText.classList.add("text-slate-400"); }
+            if (contentBox) { contentBox.classList.remove(contentAccent); contentBox.classList.add("bg-white"); }
+        }
+    });
+
+    renderGrid();
+    updateProgress();
+    updateNextButton();
+    (window as any).bgFetch("/api/peserta/simpan-jawaban", { action: "toggle_answer", testQuestionId: tqId, answerId: ansId });
 };
 
 (window as any).saveAnswer = (tqId: number, ansId: number) => {
@@ -688,7 +1029,57 @@ function updateNextButton() {
         q.answers.forEach(a => a.isSelected = false);
         const a = q.answers.find(x => x.ansId === ansId);
         if (a) a.isSelected = true;
-        render();
+        
+        // Manual DOM update to prevent MathJax re-render flash
+        if (q.qType === 1 || q.qType === 5) {
+            const isCb = q.qType === 5;
+            const activeClasses = isCb ? ["border-emerald-500", "shadow-md", "shadow-emerald-100"] : ["border-primary-500", "shadow-md", "shadow-primary-100"];
+            const inactiveClasses = ["border-slate-200", "hover:border-slate-300", "hover:shadow-sm"];
+            const bgAccent = isCb ? ["bg-emerald-600", "border-emerald-500"] : ["bg-primary-600", "border-primary-500"];
+            const bgInactive = ["bg-slate-50", "border-slate-200"];
+            const contentAccent = isCb ? "bg-emerald-50/50" : "bg-primary-50/50";
+            
+            q.answers.forEach((ans:any) => {
+                const input = document.querySelector(`input[value="${ans.ansId}"]`) as HTMLInputElement | null;
+                if (!input) return;
+                input.checked = ans.isSelected;
+                const label = input.closest('label');
+                if (!label) return;
+                
+                const letterBox = label.firstElementChild;
+                const contentBox = label.lastElementChild;
+                const letterText = letterBox?.firstElementChild;
+                
+                if (ans.isSelected) {
+                    label.classList.remove(...inactiveClasses); label.classList.add(...activeClasses);
+                    if (letterBox) { letterBox.classList.remove(...bgInactive); letterBox.classList.add(...bgAccent); }
+                    if (letterText) { letterText.classList.remove("text-slate-400"); letterText.classList.add("text-white"); }
+                    if (contentBox) { contentBox.classList.remove("bg-white"); contentBox.classList.add(contentAccent); }
+                } else {
+                    label.classList.remove(...activeClasses); label.classList.add(...inactiveClasses);
+                    if (letterBox) { letterBox.classList.remove(...bgAccent); letterBox.classList.add(...bgInactive); }
+                    if (letterText) { letterText.classList.remove("text-white"); letterText.classList.add("text-slate-400"); }
+                    if (contentBox) { contentBox.classList.remove(contentAccent); contentBox.classList.add("bg-white"); }
+                }
+            });
+        } else if (q.qType === 6) {
+            const inputs = document.querySelectorAll(`input[name="bs${tqId}"]`);
+            inputs.forEach((input: any) => {
+                const label = input.closest('label');
+                if (!label) return;
+                const isBenar = input.classList.contains('accent-primary-600');
+                if (input.checked) {
+                    label.className = isBenar 
+                        ? "relative group flex items-center justify-center p-3 sm:p-4 rounded-xl cursor-pointer bg-primary-50 border-2 border-primary-500 shadow-sm ring-2 ring-primary-50 transition-all"
+                        : "relative group flex items-center justify-center p-3 sm:p-4 rounded-xl cursor-pointer bg-rose-50 border-2 border-rose-500 shadow-sm ring-2 ring-rose-50 transition-all";
+                } else {
+                    label.className = isBenar
+                        ? "relative group flex items-center justify-center p-3 sm:p-4 rounded-xl cursor-pointer bg-slate-50 border-2 border-slate-200 hover:border-primary-300 hover:bg-white transition-all"
+                        : "relative group flex items-center justify-center p-3 sm:p-4 rounded-xl cursor-pointer bg-slate-50 border-2 border-slate-200 hover:border-rose-300 hover:bg-white transition-all";
+                }
+            });
+        }
+        
         renderGrid();
         updateProgress();
         updateNextButton();
@@ -707,32 +1098,139 @@ function updateNextButton() {
     }
 };
 
+// ─── CLICK TO CONNECT ENGINE ───
+(window as any).matchClick = (type: 'left' | 'right', id: string, tqId: number) => {
+    const q = state.questions.find((x: any) => x.tqId === tqId);
+    if (!q) return;
+
+    let m: any = {}; try { m = JSON.parse(q.answerText || '{}'); } catch(e){}
+
+    // Check if clicking to unmatch an existing line
+    if (!_matchFocus) {
+        let isMatched = false;
+        if (type === 'left' && m[id]) {
+            m[id] = "";
+            isMatched = true;
+        } else if (type === 'right' && Object.values(m).includes(id)) {
+            for (const k in m) if (m[k] === id) m[k] = "";
+            isMatched = true;
+        }
+        
+        if (isMatched) {
+            q.answerText = JSON.stringify(m);
+            render(false);
+            renderGrid();
+            updateProgress();
+            updateNextButton();
+            (window as any).bgFetch('/api/peserta/simpan-jawaban', { action: 'save_text', testQuestionId: tqId, answerText: q.answerText });
+            return;
+        }
+    }
+
+    // Unselect dot
+    if (_matchFocus && _matchFocus.type === type && _matchFocus.id == id) {
+        _matchFocus = null;
+        render(false); // clear highlights
+        return;
+    }
+
+    // Switch focus on same column mode
+    if (!_matchFocus || _matchFocus.type === type) {
+        _matchFocus = { type, id, tqId };
+        render(false); // add highlight to new item
+        return;
+    }
+
+    // Crossed side - create a line
+    if (_matchFocus.tqId !== tqId) {
+        _matchFocus = { type, id, tqId }; // Reset across different questions
+        render(false);
+        return;
+    }
+
+    const leftId = type === 'left' ? id : _matchFocus.id;
+    const rightId = type === 'right' ? id : _matchFocus.id;
+
+    // Remove any previous line going to this right destination
+    for (const k in m) if (m[k] === rightId) m[k] = ""; 
+    
+    // Connect new pair
+    m[leftId] = rightId;
+    q.answerText = JSON.stringify(m);
+    _matchFocus = null;
+
+    render(false);
+    renderGrid();
+    updateProgress();
+    updateNextButton();
+    (window as any).bgFetch('/api/peserta/simpan-jawaban', { action: 'save_text', testQuestionId: tqId, answerText: q.answerText });
+};
+
+(window as any).clearMatching = (tqId: number) => {
+    const q = state.questions.find((x: any) => x.tqId === tqId);
+    if (q) { 
+        q.answerText = "{}"; 
+        _matchFocus = null;
+        render(false); 
+        renderGrid();
+        updateProgress(); 
+        updateNextButton();
+        (window as any).bgFetch('/api/peserta/simpan-jawaban', { action: 'save_text', testQuestionId: tqId, answerText: "{}" }); 
+    }
+};
+
+function renderMatching(tqId: number) {
+    const q = state.questions.find((x:any) => x.tqId === tqId);
+    const svg = document.getElementById(`matching-svg-${tqId}`) as any;
+    const cont = document.getElementById(`matching-container-${tqId}`);
+    if (!q || !svg || !cont) return;
+    const cR = cont.getBoundingClientRect();
+    let m: any = {}; try { m = JSON.parse(q.answerText || '{}'); } catch(er){}
+    let h = "";
+    for (const lId in m) {
+        const rv = m[lId]; if (!rv) continue;
+        const lD = cont.querySelector(`.left-dot[data-left-id="${lId}"]`) as HTMLElement;
+        const rD = cont.querySelector(`.right-dot[data-right-val="${rv.replace(/"/g, '&quot;')}"]`) as HTMLElement;
+        if (lD && rD) {
+            const lR = lD.getBoundingClientRect(), rR = rD.getBoundingClientRect();
+            const x1 = (lR.left + Math.max(0, lR.width/2))-cR.left;
+            const y1 = (lR.top + Math.max(0, lR.height/2))-cR.top;
+            const x2 = (rR.left + Math.max(0, rR.width/2))-cR.left;
+            const y2 = (rR.top + Math.max(0, rR.height/2))-cR.top;
+            h += `<path d="M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}" stroke="url(#grad-${tqId})" stroke-width="4" stroke-linecap="round" fill="none" class="filter drop-shadow-md" />`;
+            // Add a circle on connection point
+            h += `<circle cx="${x2}" cy="${y2}" r="5" fill="#10b981" />`;
+            h += `<circle cx="${x1}" cy="${y1}" r="5" fill="#6366f1" />`;
+        }
+    }
+    svg.innerHTML = `<defs><linearGradient id="grad-${tqId}" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#3b82f6" /><stop offset="100%" style="stop-color:#10b981" /></linearGradient></defs>${h}`;
+}
+
 (window as any).finishTest = () => {
-    const unansweredArr = state.questions.filter(q => {
-        if (q.qType === 1) return !q.answers.some(a => a.isSelected);
+    const unansweredArr = state.questions.filter((q: any) => {
+        if (q.qType === 1 || q.qType === 5 || q.qType === 6) return !q.answers.some((a: any) => a.isSelected);
+        if (q.qType === 4) { try { return !Object.values(JSON.parse(q.answerText || "{}")).some(v => v !== ""); } catch(e) { return true; } }
         return !(q.answerText && q.answerText.trim());
     });
     const unanswered = unansweredArr.length;
-    const doubtful = state.questions.filter(q => q.isDoubtful).length;
+    const doubtful = state.questions.filter((q: any) => q.isDoubtful).length;
     const total = state.questions.length;
     
     if (unanswered > 0 || doubtful > 0) {
         let errs = [];
         if (unanswered > 0) errs.push(`${unanswered} soal belum dijawab`);
         if (doubtful > 0) errs.push(`${doubtful} soal masih ragu-ragu`);
-        alert(`Ujian tidak dapat diselesaikan!\n\nMasih ada ${errs.join(" dan ")}.\nSilakan periksa kembali lembar jawaban Anda.`);
-        return;
+        if (!confirm(`PERINGATAN!\n\nMasih ada ${errs.join(" dan ")}.\n\nApakah Anda YAKIN ingin mengakhiri ujian sekarang? Nilai Anda mungkin tidak maksimal.`)) {
+            return;
+        }
+    } else {
+        if (!confirm(`Anda telah menjawab dan meyakini semua ${total} soal.\n\nSelesaikan ujian sekarang?`)) {
+            return;
+        }
     }
 
-    let msg = `Anda telah menjawab dan meyakini semua ${total} soal.\n\nSelesaikan ujian sekarang?`;
-    
     isSystemAction = true;
-    const ok = confirm(msg);
-    if (ok) {
-        window.location.href = `/api/peserta/selesai?sessionId=${state.session.id}`;
-    } else {
-        isSystemAction = false;
-    }
+    window.location.href = `/api/peserta/selesai?sessionId=${state.session.id}`;
 };
 
 // ─── MOBILE NAV TOGGLE ───

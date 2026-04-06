@@ -31,10 +31,10 @@ export const POST: APIRoute = async ({ request }) => {
     try {
         const body = await request.json();
         const {
-            name, detail,
+            name, detail, mode,
             scoreRight, scoreWrong, scoreUnanswered,
             maxScore, showResult, showDetail,
-            topicSets, groups
+            topicSets, groups, tkaScores
         } = body;
 
         if (!name) {
@@ -45,12 +45,21 @@ export const POST: APIRoute = async ({ request }) => {
         const [test] = await db.insert(tests).values({
             name,
             detail,
+            mode: mode ?? 'standard',
             scoreRight: scoreRight ?? 1,
             scoreWrong: scoreWrong ?? 0,
             scoreUnanswered: scoreUnanswered ?? 0,
             maxScore: maxScore ?? 0,
             showResult: showResult ?? false,
             showDetail: showDetail ?? false,
+            tkaScoreConfig: tkaScores ? JSON.stringify({
+                1: tkaScores.pg,
+                2: tkaScores.esai,
+                3: tkaScores.singkat,
+                4: tkaScores.jodoh,
+                5: tkaScores.ceklis,
+                6: tkaScores.bs,
+            }) : null,
         }).returning();
 
         // Assign to groups (if provided from another UI)
@@ -131,9 +140,9 @@ export const PUT: APIRoute = async ({ request }) => {
     try {
         const body = await request.json();
         const {
-            id, name, detail,
+            id, name, detail, mode,
             scoreRight, scoreWrong, scoreUnanswered,
-            maxScore, showResult, showDetail
+            maxScore, showResult, showDetail, tkaScores
         } = body;
 
         if (!id) {
@@ -153,11 +162,22 @@ export const PUT: APIRoute = async ({ request }) => {
                 ...updateData,
                 name,
                 detail,
+                mode: mode ?? 'standard',
                 scoreRight: scoreRight ?? 1,
                 scoreWrong: scoreWrong ?? 0,
                 scoreUnanswered: scoreUnanswered ?? 0,
                 maxScore: maxScore ?? 0,
             };
+            if (tkaScores) {
+               updateData.tkaScoreConfig = JSON.stringify({
+                    1: tkaScores.pg,
+                    2: tkaScores.esai,
+                    3: tkaScores.singkat,
+                    4: tkaScores.jodoh,
+                    5: tkaScores.ceklis,
+                    6: tkaScores.bs,
+               });
+            }
         }
 
         await db.update(tests).set(updateData).where(eq(tests.id, id));

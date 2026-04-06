@@ -46,6 +46,26 @@ const existingQuestions = rawQuestions.map((q) => {
     />
     <script is:inline src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
 
+    <!-- Highlight.js for code syntax -->
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script
+        is:inline
+        src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+    ></script>
+
+    <!-- KaTeX for math formulas -->
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"
+    />
+    <script
+        is:inline
+        src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"
+    ></script>
+
     <div
         class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4"
     >
@@ -132,8 +152,11 @@ const existingQuestions = rawQuestions.map((q) => {
                         class="w-full px-4 py-2.5 bg-surface-50 border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
                     >
                         <option value="1">Pilihan Ganda</option>
+                        <option value="5">Pilihan Ganda Kompleks (Banyak Jawaban)</option>
+                        <option value="6">Benar / Salah</option>
                         <option value="2">Esai / Uraian</option>
                         <option value="3">Jawaban Singkat</option>
+                        <option value="4">Menjodohkan (Matching)</option>
                     </select>
                 </div>
                 <div>
@@ -206,14 +229,127 @@ const existingQuestions = rawQuestions.map((q) => {
                 </div>
                 <div
                     id="editor-container"
-                    class="bg-white min-h-[250px] rounded-b-lg text-base"
+                    class="bg-white min-h-[100px] rounded-b-lg text-base"
                 >
                 </div>
             </div>
 
+            <!-- Options Container (Dynamic) -->
             <div
-                class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface-50 p-4 rounded-lg border border-surface-200"
+                id="options-container"
+                class="bg-surface-50 p-6 rounded-lg border border-surface-200 shadow-inner"
             >
+                <div class="mb-4">
+                    <h4
+                        class="font-semibold text-surface-800 flex items-center"
+                    >
+                        <i class="icon-list w-4 h-4 mr-2 text-primary-500"></i>
+                        <span id="options-title">Pilihan Jawaban (Ganda)</span>
+                    </h4>
+                    <p class="text-xs text-surface-500 mt-1" id="options-desc">
+                        Isi teks opsi dan pilih salah satu radio button di
+                        sebelah kiri sebagai <b>Kunci Jawaban</b> yang benar.
+                    </p>
+                </div>
+
+                <div class="space-y-4">
+                    {
+                        ["A", "B", "C", "D", "E"].map((letter, idx) => (
+                            <div id={`opt-row-${idx}`} class="flex items-start gap-3 bg-white p-3 rounded border border-surface-200 transition-colors focus-within:border-primary-300 focus-within:ring-1 focus-within:ring-primary-500/20">
+                                <label class="flex items-center mt-2.5 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="answerKey"
+                                        value={idx}
+                                        class="w-4 h-4 text-emerald-600 border-surface-300 focus:ring-emerald-500"
+                                        title={`Jadikan opsi ${letter} sebagai jawaban benar`}
+                                    />
+                                    <span class="ml-2 w-7 h-7 flex items-center justify-center bg-surface-100 rounded text-sm font-bold text-surface-600">
+                                        {letter}
+                                    </span>
+                                </label>
+                                <textarea
+                                    name={`option_${idx}`}
+                                    rows="2"
+                                    class="flex-1 px-4 py-2 border-0 bg-transparent text-sm focus:ring-0 text-surface-800 resize-y"
+                                    placeholder={`Ketik teks opsi jawaban ${letter}...`}
+                                    required
+                                />
+                            </div>
+                        ))
+                    }
+                </div>
+            </div>
+
+            <!-- Essay Config Container (Dynamic — shows for type 2 & 3) -->
+            <div
+                id="essay-container"
+                class="hidden bg-indigo-50 p-6 rounded-lg border border-indigo-200 shadow-inner space-y-5"
+            >
+                <div class="mb-1">
+                    <h4 class="font-semibold text-indigo-800 flex items-center">
+                        <i class="icon-edit-3 w-4 h-4 mr-2 text-indigo-500"></i>
+                        Konfigurasi Penilaian Esai
+                    </h4>
+                    <p class="text-xs text-indigo-600 mt-1">
+                        Tentukan cara sistem menilai jawaban siswa secara otomatis.
+                    </p>
+                </div>
+
+                <!-- Grading Mode -->
+                <div>
+                    <label for="gradingMode" class="block text-sm font-medium text-indigo-800 mb-1.5">Mode Penilaian <span class="text-danger">*</span></label>
+                    <select id="gradingMode" name="gradingMode" class="w-full px-4 py-2.5 bg-white border border-indigo-200 rounded-lg text-sm transition focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400 text-surface-800">
+                        <option value="manual">Manual — Guru koreksi penuh (recommended untuk esai panjang)</option>
+                        <option value="keyword">Keyword Scoring — Otomatis berdasarkan kata kunci (cocok untuk konsep)</option>
+                        <option value="hybrid">Hybrid — Keyword + kemiripan teks (lebih fleksibel)</option>
+                    </select>
+                    <p class="text-[11px] text-indigo-500 mt-1">Mode Manual: skor = 0 sementara, guru wajib koreksi di menu Hasil → Koreksi Esai.</p>
+                </div>
+
+                <!-- Max Score for essay -->
+                <div>
+                    <label for="essayMaxScore" class="block text-sm font-medium text-indigo-800 mb-1.5">Skor Maksimal Soal Ini</label>
+                    <input type="number" id="essayMaxScore" name="essayMaxScore" value="100" min="1" max="1000"
+                        class="w-48 px-4 py-2.5 bg-white border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400" />
+                    <p class="text-[11px] text-indigo-500 mt-1">Total skor maksimal yang bisa diraih dari soal ini.</p>
+                </div>
+
+                <!-- Correct Answer -->
+                <div id="correct-answer-section">
+                    <label for="correctAnswer" class="block text-sm font-medium text-indigo-800 mb-1.5">Kunci Jawaban / Jawaban Rujukan</label>
+                    <textarea id="correctAnswer" name="correctAnswer" rows="3"
+                        placeholder="Ketik jawaban ideal/kunci di sini..."
+                        class="w-full px-4 py-3 bg-white border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400 resize-y"
+                    ></textarea>
+                    <p class="text-[11px] text-indigo-500 mt-1">Digunakan sebagai referensi untuk mode Hybrid. Pada mode Keyword, kunci jawaban bersifat opsional.</p>
+                </div>
+
+                <!-- Keywords Section -->
+                <div id="keywords-section">
+                    <div class="flex items-center justify-between mb-3">
+                        <label class="block text-sm font-medium text-indigo-800">Kata Kunci & Bobot Skor</label>
+                        <button type="button" id="add-keyword-btn"
+                            class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition">
+                            <i class="icon-plus w-3.5 h-3.5"></i> Tambah Kata Kunci
+                        </button>
+                    </div>
+                    <div id="keywords-list" class="space-y-2.5">
+                        <!-- Keywords rendered by JS -->
+                    </div>
+                    <p class="text-[11px] text-indigo-500 mt-2">Pastikan total bobot = 100% dari skor maksimal. Siswa mendapat poin parsial untuk tiap kata kunci yang ditemukan.</p>
+
+                    <!-- Score preview -->
+                    <div id="score-preview" class="mt-3 p-3 bg-white border border-indigo-200 rounded-lg hidden">
+                        <p class="text-xs font-semibold text-indigo-700">Preview Bobot:</p>
+                        <div class="flex items-center gap-2 mt-1.5">
+                            <div id="score-bar" class="h-2 bg-emerald-400 rounded-full transition-all" style="width:0%"></div>
+                            <span id="score-total" class="text-xs font-bold text-indigo-700">0 / 100</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
                 <div>
                     <label
                         for="audio"
@@ -247,6 +383,36 @@ const existingQuestions = rawQuestions.map((q) => {
                         <option value="2">2 kali putar</option>
                         <option value="3">3 kali putar</option>
                     </select>
+                </div>
+            </div>
+
+            <!-- Matching Pairs Container (Dynamic — shows for type 4) -->
+            <div
+                id="matching-container"
+                class="hidden bg-emerald-50 p-6 rounded-lg border border-emerald-200 shadow-inner space-y-5"
+            >
+                <div class="mb-1">
+                    <h4 class="font-semibold text-emerald-800 flex items-center">
+                        <i class="icon-link w-4 h-4 mr-2 text-emerald-500"></i>
+                        Pasangan Menjodohkan
+                    </h4>
+                    <p class="text-xs text-emerald-600 mt-1">
+                        Masukkan himpunan Sisi Kiri (soal/pernyataan) dan Sisi Kanan (pasangan jawaban). Sistem akan otomatis mengacak daftar sebelah kanan saat ujian dikerjakan siswa.
+                    </p>
+                </div>
+
+                <div id="matching-list" class="space-y-3">
+                    <!-- Populated by JS -->
+                </div>
+
+                <div class="flex items-center justify-between border-t border-emerald-200/50 pt-4">
+                    <button type="button" id="add-matching-btn" class="px-4 py-2 bg-emerald-100/50 hover:bg-emerald-200 text-emerald-700 text-sm font-semibold border border-emerald-300 border-dashed rounded-lg transition-colors flex items-center">
+                        <i class="icon-plus w-4 h-4 mr-2"></i> Tambah Pasangan Baru
+                    </button>
+                    <div class="text-right hidden" id="matching-score-preview">
+                        <p class="text-[10px] text-emerald-600 font-bold uppercase tracking-wider mb-1">Estimasi Total Poin</p>
+                        <p class="text-lg font-black text-emerald-700 font-mono" id="matching-score-total">0</p>
+                    </div>
                 </div>
             </div>
 
@@ -326,14 +492,13 @@ const existingQuestions = rawQuestions.map((q) => {
                                         />
                                     </td>
                                     <td class="px-5 py-4">
-                                        {q.type === 1 &&
+                                        {(q.type === 1 || q.type === 5 || q.type === 6) &&
                                         q.answers.length > 0 ? (
                                             <div class="flex flex-wrap gap-1.5">
                                                 {q.answers.map((ans, aIdx) => {
-                                                    const label =
-                                                        String.fromCharCode(
-                                                            65 + aIdx,
-                                                        ); // A, B, C, D, E...
+                                                    const label = q.type === 6
+                                                        ? (aIdx === 0 ? "B" : "S")
+                                                        : String.fromCharCode(65 + aIdx); // A, B, C, D, E...
                                                     return (
                                                         <div
                                                             class={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold border ${ans.isCorrect ? "bg-emerald-100 border-emerald-300 text-emerald-700" : "bg-surface-100 border-surface-200 text-surface-500"}`}
@@ -348,20 +513,24 @@ const existingQuestions = rawQuestions.map((q) => {
                                                     );
                                                 })}
                                             </div>
-                                        ) : q.type === 1 ? (
+                                        ) : (q.type === 1 || q.type === 5 || q.type === 6) ? (
                                             <span class="text-xs text-danger flex items-center">
                                                 <i class="icon-alert-triangle w-3.5 h-3.5 mr-1" />{" "}
                                                 Kosong
                                             </span>
+                                        ) : q.type === 4 ? (
+                                            <span class="px-2.5 py-1 bg-emerald-100 text-emerald-600 rounded-lg text-[10px] font-bold tracking-wider uppercase">
+                                                Menjodohkan ({q.answers.length} Pasang)
+                                            </span>
                                         ) : (
                                             <span class="px-2.5 py-1 bg-surface-100 text-surface-500 rounded-lg text-[10px] font-bold tracking-wider uppercase">
-                                                Esai
+                                                Esai / Teks
                                             </span>
                                         )}
                                     </td>
                                     <td class="px-5 py-4 text-center">
                                         <div class="flex items-center justify-center gap-1.5">
-                                            {q.type === 1 && (
+                                            {(q.type === 1 || q.type === 5 || q.type === 6) && (
                                                 <a
                                                     href={`/admin/soal/jawaban/${q.id}`}
                                                     title="Kelola Kunci Jawaban"
@@ -423,9 +592,14 @@ const existingQuestions = rawQuestions.map((q) => {
         }
     };
 
+    // Connect globals for Quill
+    (window as any).katex = (window as any).katex;
+    (window as any).hljs = (window as any).hljs;
+
     // Initialize Quill editor
     const quill = new (window as any).Quill("#editor-container", {
         modules: {
+            syntax: true,
             toolbar: "#toolbar-container",
         },
         placeholder: "Ketikkan soal Anda di sini...",
@@ -440,6 +614,280 @@ const existingQuestions = rawQuestions.map((q) => {
     const errorMsg = document.getElementById("error-msg");
     const topicId = (document.getElementById("topicId") as HTMLInputElement)
         .value;
+
+    const typeSelect = document.getElementById("type") as HTMLSelectElement;
+    const optionsContainer = document.getElementById("options-container");
+    const optionTextareas = optionsContainer?.querySelectorAll("textarea");
+    const optionRadios = optionsContainer?.querySelectorAll(
+        "input[type='radio']",
+    );
+
+    typeSelect?.addEventListener("change", (e) => {
+        const val = (e.target as HTMLSelectElement).value;
+        if (val === "1" || val === "5" || val === "6") {
+            // PG, PGK, True/False
+            optionsContainer?.classList.remove("hidden");
+            
+            const inputs = optionsContainer?.querySelectorAll("input[name='answerKey']");
+            inputs?.forEach(inp => {
+                const el = inp as HTMLInputElement;
+                el.type = val === "5" ? "checkbox" : "radio";
+            });
+
+            if (val === "6") {
+                document.getElementById("options-title")!.textContent = "Pilihan Jawaban (Benar/Salah)";
+                document.getElementById("options-desc")!.innerHTML = "Pilih radio button di sebelah kiri sebagai <b>Kunci Jawaban</b> yang benar.";
+                
+                for (let i = 0; i < 5; i++) {
+                    const row = document.getElementById(`opt-row-${i}`);
+                    const ta = row?.querySelector("textarea");
+                    if (row && ta) {
+                        if (i < 2) {
+                            row.classList.remove("hidden");
+                            ta.readOnly = true;
+                            ta.classList.add("opacity-70", "cursor-not-allowed", "font-medium", "bg-surface-100");
+                            ta.value = i === 0 ? "Benar" : "Salah";
+                            ta.required = true;
+                        } else {
+                            row.classList.add("hidden");
+                            ta.required = false;
+                        }
+                    }
+                }
+            } else {
+                document.getElementById("options-title")!.textContent = "Pilihan Jawaban (Ganda)";
+                document.getElementById("options-desc")!.innerHTML = val === "5" ? "Isi teks opsi dan pilih <b>beberapa</b> checkbox sebagai kunci jawaban." : "Isi teks opsi dan pilih salah satu radio button sebagai <b>Kunci Jawaban</b> yang benar.";
+                
+                for (let i = 0; i < 5; i++) {
+                    const row = document.getElementById(`opt-row-${i}`);
+                    const ta = row?.querySelector("textarea");
+                    if (row && ta) {
+                        row.classList.remove("hidden");
+                        ta.readOnly = false;
+                        ta.classList.remove("opacity-70", "cursor-not-allowed", "font-medium", "bg-surface-100");
+                        if (ta.value === "Benar" && i === 0) ta.value = "";
+                        if (ta.value === "Salah" && i === 1) ta.value = "";
+                        ta.required = true;
+                    }
+                }
+            }
+
+            document.getElementById("essay-container")?.classList.add("hidden");
+            document.getElementById("matching-container")?.classList.add("hidden");
+        } else if (val === "4") {
+            // Menjodohkan
+            optionsContainer?.classList.add("hidden");
+            optionTextareas?.forEach((t) => ((t as HTMLTextAreaElement).required = false));
+            document.getElementById("essay-container")?.classList.add("hidden");
+            document.getElementById("matching-container")?.classList.remove("hidden");
+        } else {
+            // Essay or Short Answer
+            optionsContainer?.classList.add("hidden");
+            optionTextareas?.forEach((t) => ((t as HTMLTextAreaElement).required = false));
+            document.getElementById("essay-container")?.classList.remove("hidden");
+            document.getElementById("matching-container")?.classList.add("hidden");
+        }
+    });
+
+    // ─── KEYWORD MANAGER ───
+    let keywords: { word: string; score: number; synonyms: string }[] = [];
+
+    function renderKeywords() {
+        const list = document.getElementById("keywords-list");
+        const preview = document.getElementById("score-preview");
+        const bar = document.getElementById("score-bar");
+        const totalEl = document.getElementById("score-total");
+        const maxScore = parseFloat((document.getElementById("essayMaxScore") as HTMLInputElement)?.value || "100");
+
+        if (!list) return;
+
+        if (keywords.length === 0) {
+            list.innerHTML = `<p class="text-xs text-indigo-400 italic">Belum ada kata kunci. Klik "Tambah Kata Kunci" untuk menambahkan.</p>`;
+            if (preview) preview.classList.add("hidden");
+            return;
+        }
+
+        if (preview) preview.classList.remove("hidden");
+
+        const totalBobot = keywords.reduce((s, k) => s + (parseFloat(String(k.score)) || 0), 0);
+        const pct = Math.min(100, (totalBobot / maxScore) * 100);
+
+        if (bar) bar.style.width = `${pct}%`;
+        if (bar) bar.style.backgroundColor = pct > 100 ? '#ef4444' : '#34d399';
+        if (totalEl) totalEl.textContent = `${totalBobot} / ${maxScore} (${Math.round(pct)}%)`;
+        if (totalEl) totalEl.style.color = pct > 100 ? '#dc2626' : '#065f46';
+
+        list.innerHTML = keywords.map((kw, idx) => `
+            <div class="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200">
+                <div class="flex-1 min-w-0">
+                    <input
+                        type="text"
+                        placeholder="Kata kunci (misal: fotosintesis)"
+                        value="${escapeHtml(kw.word)}"
+                        oninput="updateKeyword(${idx}, 'word', this.value)"
+                        class="w-full px-2 py-1 border border-indigo-200 rounded text-sm focus:outline-none focus:border-indigo-400 mb-1"
+                    />
+                    <input
+                        type="text"
+                        placeholder="Sinonim (pisahkan koma: klorofil,chlorophyll)"
+                        value="${escapeHtml(kw.synonyms)}"
+                        oninput="updateKeyword(${idx}, 'synonyms', this.value)"
+                        class="w-full px-2 py-1 border border-indigo-100 rounded text-xs text-indigo-600 focus:outline-none focus:border-indigo-300"
+                    />
+                </div>
+                <div class="shrink-0">
+                    <div class="flex items-center gap-1">
+                        <input
+                            type="number"
+                            min="0" max="1000"
+                            value="${kw.score}"
+                            oninput="updateKeyword(${idx}, 'score', this.value)"
+                            class="w-16 px-2 py-1 border border-indigo-200 rounded text-sm text-center focus:outline-none focus:border-indigo-400"
+                        />
+                        <span class="text-[10px] text-indigo-500">poin</span>
+                    </div>
+                </div>
+                <button type="button" onclick="removeKeyword(${idx})"
+                    class="shrink-0 w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-500 border border-rose-200 flex items-center justify-center transition">
+                    <i class="icon-x w-3.5 h-3.5"></i>
+                </button>
+            </div>
+        `).join("");
+    }
+
+    function escapeHtml(text: string) {
+        return String(text || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+
+    (window as any).updateKeyword = (idx: number, field: string, val: string) => {
+        if (keywords[idx]) {
+            (keywords[idx] as any)[field] = val;
+            // Re-render only the preview to avoid losing focus
+            const maxScore = parseFloat((document.getElementById("essayMaxScore") as HTMLInputElement)?.value || "100");
+            const totalBobot = keywords.reduce((s, k) => s + (parseFloat(String(k.score)) || 0), 0);
+            const pct = Math.min(100, (totalBobot / maxScore) * 100);
+            const bar = document.getElementById("score-bar");
+            const totalEl = document.getElementById("score-total");
+            if (bar) { bar.style.width = `${pct}%`; bar.style.backgroundColor = pct > 100 ? '#ef4444' : '#34d399'; }
+            if (totalEl) { totalEl.textContent = `${totalBobot} / ${maxScore} (${Math.round(pct)}%)`; totalEl.style.color = pct > 100 ? '#dc2626' : '#065f46'; }
+        }
+    };
+
+    (window as any).removeKeyword = (idx: number) => {
+        keywords.splice(idx, 1);
+        renderKeywords();
+    };
+
+    document.getElementById("add-keyword-btn")?.addEventListener("click", () => {
+        keywords.push({ word: "", score: 10, synonyms: "" });
+        renderKeywords();
+        // Focus last input
+        setTimeout(() => {
+            const inputs = document.querySelectorAll("#keywords-list input[type='text']");
+            const last = inputs[inputs.length - 2] as HTMLInputElement;
+            if (last) { last.focus(); }
+        }, 50);
+    });
+
+    document.getElementById("essayMaxScore")?.addEventListener("input", () => renderKeywords());
+
+    // Initial render
+    renderKeywords();
+
+
+    // ─── MATCHING (MENJODOHKAN) MANAGER ───
+    let matchingPairs: { left: string; right: string; weight: number }[] = [
+        { left: "", right: "", weight: 10 },
+        { left: "", right: "", weight: 10 }
+    ];
+
+    function renderMatchingPairs() {
+        const list = document.getElementById("matching-list");
+        const preview = document.getElementById("matching-score-preview");
+        const totalEl = document.getElementById("matching-score-total");
+
+        if (!list) return;
+
+        if (matchingPairs.length === 0) {
+            list.innerHTML = `<p class="text-xs text-emerald-500 italic">Belum ada pasangan. Klik Tambah Pasangan Baru.</p>`;
+            if (preview) preview.classList.add("hidden");
+            return;
+        }
+
+        if (preview) preview.classList.remove("hidden");
+
+        const totalBobot = matchingPairs.reduce((s, k) => s + (parseFloat(String(k.weight)) || 0), 0);
+        if (totalEl) totalEl.textContent = `${totalBobot} poin`;
+
+        list.innerHTML = matchingPairs.map((pair, idx) => `
+            <div class="flex items-start gap-2 bg-white p-3 rounded-lg border border-emerald-200">
+                <div class="flex-1 min-w-0 space-y-2">
+                    <div>
+                        <label class="block text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1 pl-1">Pernyataan (Kiri)</label>
+                        <input
+                            type="text"
+                            placeholder="Tulis soal/pernyataan..."
+                            value="${escapeHtml(pair.left)}"
+                            oninput="updateMatching(${idx}, 'left', this.value)"
+                            class="w-full px-3 py-1.5 border border-emerald-200 rounded text-sm focus:outline-none focus:border-emerald-400 bg-emerald-50/30"
+                        />
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-surface-400 uppercase tracking-widest mb-1 pl-1">Pasangan Benar (Kanan)</label>
+                        <input
+                            type="text"
+                            placeholder="Tulis kunci jawaban untuk sisi kiri ini..."
+                            value="${escapeHtml(pair.right)}"
+                            oninput="updateMatching(${idx}, 'right', this.value)"
+                            class="w-full px-3 py-1.5 border border-surface-200 rounded text-sm focus:outline-none focus:border-surface-400"
+                        />
+                    </div>
+                </div>
+                <div class="shrink-0 flex flex-col items-center border-l border-emerald-100 pl-3 ml-1">
+                    <label class="block text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1 text-center">Bobot</label>
+                    <input
+                        type="number"
+                        min="0" max="1000"
+                        value="${pair.weight}"
+                        oninput="updateMatching(${idx}, 'weight', this.value)"
+                        title="Poin parsial jika pasangan ini dijawab benar"
+                        class="w-14 px-2 py-1.5 border border-emerald-200 rounded text-sm text-center focus:outline-none focus:border-emerald-400 bg-white"
+                    />
+                    <button type="button" onclick="removeMatching(${idx})" title="Hapus Pasangan"
+                        class="mt-3 w-8 h-8 rounded-lg bg-surface-100 hover:bg-rose-100 text-surface-400 hover:text-rose-500 transition flex items-center justify-center">
+                        <i class="icon-trash-2 w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        `).join("");
+    }
+
+    (window as any).updateMatching = (idx: number, field: string, val: string) => {
+        if (matchingPairs[idx]) {
+            (matchingPairs[idx] as any)[field] = val;
+            const totalBobot = matchingPairs.reduce((s, k) => s + (parseFloat(String(k.weight)) || 0), 0);
+            const totalEl = document.getElementById("matching-score-total");
+            if (totalEl) totalEl.textContent = `${totalBobot} poin`;
+        }
+    };
+
+    (window as any).removeMatching = (idx: number) => {
+        matchingPairs.splice(idx, 1);
+        renderMatchingPairs();
+    };
+
+    document.getElementById("add-matching-btn")?.addEventListener("click", () => {
+        matchingPairs.push({ left: "", right: "", weight: 10 });
+        renderMatchingPairs();
+        setTimeout(() => {
+            const inputs = document.querySelectorAll("#matching-list input[type='text']");
+            const last = inputs[inputs.length - 2] as HTMLInputElement;
+            if (last) last.focus();
+        }, 50);
+    });
+
+    renderMatchingPairs();
+
 
     form?.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -474,7 +922,7 @@ const existingQuestions = rawQuestions.map((q) => {
             console.log("Mocking audio upload:", audioPath);
         }
 
-        const data = {
+        const data: any = {
             topicId,
             type: formData.get("type"),
             difficulty: formData.get("difficulty"),
@@ -483,6 +931,62 @@ const existingQuestions = rawQuestions.map((q) => {
             text: editorHtml,
             isActive: true,
         };
+
+        if (data.type === "1" || data.type === "5" || data.type === "6") {
+            const options: any[] = [];
+            let someCorrect = false;
+
+            const limit = data.type === "6" ? 2 : 5;
+            for (let i = 0; i < limit; i++) {
+                const text = formData.get(`option_${i}`) as string;
+                if (!text && i === 0 && data.type !== "6") continue;
+
+                const input = optionsContainer?.querySelector(`input[name="answerKey"][value="${i}"]`) as HTMLInputElement;
+                const isCorrect = input?.checked || false;
+                if (isCorrect) someCorrect = true;
+
+                if (data.type === "5") {
+                    options.push({ text, isCorrect });
+                } else {
+                    options.push({ text, isCorrect });
+                }
+            }
+
+            if (!someCorrect && (data.type === "1" || data.type === "6")) {
+                if (errorAlert && errorMsg) {
+                    errorMsg.textContent = "Anda harus memilih minimal satu Kunci Jawaban!";
+                    errorAlert.classList.remove("hidden");
+                }
+                submitBtn.innerHTML = originalHtml;
+                submitBtn.disabled = false;
+                return;
+            }
+            data.options = options;
+        } else if (data.type === "4") {
+            const validPairs = matchingPairs.filter(p => p.left.trim() && p.right.trim());
+            if (validPairs.length < 2) {
+                if (errorAlert && errorMsg) {
+                    errorMsg.textContent = "Soal Menjodohkan memerlukan setidaknya 2 pasangan yang tidak kosong.";
+                    errorAlert.classList.remove("hidden");
+                }
+                submitBtn.innerHTML = originalHtml;
+                submitBtn.disabled = false;
+                return;
+            }
+            data.matchingPairs = validPairs;
+        } else {
+            // Essay / Short Answer - collect essay config
+            data.essayConfig = {
+                correctAnswer: (document.getElementById("correctAnswer") as HTMLTextAreaElement)?.value || "",
+                gradingMode: (document.getElementById("gradingMode") as HTMLSelectElement)?.value || "manual",
+                maxScore: parseFloat((document.getElementById("essayMaxScore") as HTMLInputElement)?.value || "100"),
+                keywords: keywords.map((kw: any) => ({
+                    word: kw.word.trim(),
+                    score: parseFloat(String(kw.score)) || 0,
+                    synonyms: kw.synonyms ? kw.synonyms.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
+                })).filter((kw: any) => kw.word),
+            };
+        }
 
         try {
             const res = await fetch("/api/soal/pertanyaan", {
@@ -494,6 +998,17 @@ const existingQuestions = rawQuestions.map((q) => {
             const result = await res.json();
 
             if (result.success) {
+                // If essay, also save essay config
+                if (data.type !== "1" && data.essayConfig && result.data?.id) {
+                    await fetch("/api/soal/essay-config", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            questionId: result.data.id,
+                            ...data.essayConfig,
+                        }),
+                    });
+                }
                 window.location.href = `/admin/soal/daftar/${topicId}`;
             } else {
                 if (errorAlert && errorMsg) {

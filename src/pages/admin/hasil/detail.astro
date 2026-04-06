@@ -10,6 +10,7 @@ import {
     questionAnswers,
     users,
     userGroups,
+    essayConfigs,
 } from "../../../db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 
@@ -20,6 +21,8 @@ interface Choice {
     ansId: number;
     ansText: string;
     isCorrect: boolean;
+    matchRight?: string | null;
+    weight?: number | null;
     orderIdx: number;
 }
 
@@ -40,6 +43,7 @@ const session = await db
         testId: testUsers.testId,
         userId: testUsers.userId,
         testName: tests.name,
+        testMode: tests.mode,
         scoreRight: tests.scoreRight,
         scoreWrong: tests.scoreWrong,
         scoreUnanswered: tests.scoreUnanswered,
@@ -55,6 +59,15 @@ const session = await db
     .where(eq(testUsers.id, sessId))
     .get();
 
+const isTkaDetail = session?.testMode === 'tka';
+let parsedTkaScores: Record<string, number> = {};
+if (isTkaDetail && session?.testId) {
+    const testInfo = await db.select({ tkaScoreConfig: tests.tkaScoreConfig }).from(tests).where(eq(tests.id, session.testId)).get();
+    if (testInfo?.tkaScoreConfig) {
+        try { parsedTkaScores = JSON.parse(testInfo.tkaScoreConfig); } catch(e) {}
+    }
+}
+
 if (!session) {
     return Astro.redirect("/admin/hasil");
 }
@@ -67,15 +80,21 @@ const sessionQuestions = await db
         orderIdx: testQuestions.orderIdx,
         qText: questions.text,
         qType: questions.type,
+        answerText: testQuestions.answerText,
+        score: testQuestions.score,
+        essayScoreOverride: testQuestions.essayScoreOverride,
+        essayCorrectAnswer: essayConfigs.correctAnswer,
+        essayMaxScore: essayConfigs.maxScore,
     })
     .from(testQuestions)
     .innerJoin(questions, eq(testQuestions.questionId, questions.id))
+    .leftJoin(essayConfigs, eq(questions.id, essayConfigs.questionId))
     .where(eq(testQuestions.testUserId, sessId))
     .orderBy(testQuestions.orderIdx)
     .all();
 
 // 3. Fetch all choices and responses
-const tqIds = sessionQuestions.map((q) => q.tqId);
+const tqIds = sessionQuestions.map((q: any) => q.tqId);
 let allChoices: Choice[] = [];
 if (tqIds.length > 0) {
     allChoices = await db
@@ -86,6 +105,8 @@ if (tqIds.length > 0) {
             ansId: questionAnswers.id,
             ansText: questionAnswers.text,
             isCorrect: questionAnswers.isCorrect,
+            matchRight: questionAnswers.matchRight,
+            weight: questionAnswers.weight,
             orderIdx: testQuestionAnswers.orderIdx,
         })
         .from(testQuestionAnswers)
@@ -116,14 +137,73 @@ const processedQuestions = sessionQuestions.map((q: typeof sessionQuestions[0]) 
     let status = "unanswered";
     let earnedPoints = session.scoreUnanswered || 0;
 
+    // Check if it's an essay
+    if (q.qType === 2 || q.qType === 3 || q.qType === 6) {
+        let earnedPoints = q.essayScoreOverride !== null ? q.essayScoreOverride : (q.score || 0);
+        let status = "unanswered";
+        
+        let cKey = "Esai";
+        if (q.qType === 3) cKey = "Singkat";
+        else if (q.qType === 6) cKey = "Benar/Salah";
+
+        if (q.answerText) {
+            status = earnedPoints > 0 ? "correct" : "wrong"; 
+            if (earnedPoints > 0) correctCount++;
+            else wrongCount++;
+        } else {
+            wrongCount++;
+            unansweredCount++;
+        }
+
+        return {
+            ...q,
+            choices,
+            selected: null,
+            selectedKey: "-",
+            correctKey: cKey,
+            status,
+            earnedPoints,
+            essayCorrectAnswer: q.essayCorrectAnswer || 'N/A'
+        };
+    }
+
+    if (q.qType === 4) {
+        let savedMatches: Record<string, string> = {};
+        try { if(q.answerText) savedMatches = JSON.parse(q.answerText); } catch(e){}
+        
+        const hasAnswers = Object.values(savedMatches).some(v => v !== "");
+        if (hasAnswers) {
+             earnedPoints = q.score || 0;
+             status = earnedPoints > 0 ? "correct" : "wrong"; 
+             if (earnedPoints > 0) correctCount++;
+             else wrongCount++;
+        } else {
+             status = "unanswered";
+             earnedPoints = 0;
+             wrongCount++;
+             unansweredCount++;
+        }
+
+        return {
+            ...q,
+            choices,
+            selected: null,
+            selectedKey: "-",
+            correctKey: "Menjodohkan",
+            status,
+            earnedPoints,
+            savedMatches
+        };
+    }
+
     if (selected) {
         if (!!selected.isCorrect) {
             status = "correct";
-            earnedPoints = session.scoreRight || 1;
+            earnedPoints = q.score ?? (session.scoreRight || 1);
             correctCount++;
         } else {
             status = "wrong";
-            earnedPoints = session.scoreWrong || 0;
+            earnedPoints = q.score ?? (session.scoreWrong || 0);
             wrongCount++;
         }
     } else {
@@ -144,20 +224,36 @@ const processedQuestions = sessionQuestions.map((q: typeof sessionQuestions[0]) 
     };
 });
 
-const rawScore = (correctCount * (session.scoreRight || 1)) + 
-                 (wrongCount * (session.scoreWrong || 0)) + 
-                 (unansweredCount * (session.scoreUnanswered || 0));
-
 const maxScoreScale = session.maxScore && session.maxScore > 0 ? session.maxScore : 100;
-const totalQs = processedQuestions.length;
-const maxRaw = totalQs * (session.scoreRight || 1);
+
+// Compute actual raw accumulated score from all questions
+const rawScore = processedQuestions.reduce((sum: number, q: any) => sum + (q.earnedPoints || 0), 0);
+
+const maxRaw = processedQuestions.reduce((sum: number, q: any) => {
+    if (isTkaDetail) {
+        const qScoreRight = parsedTkaScores[q.qType] !== undefined ? parseFloat(String(parsedTkaScores[q.qType])) : (session.scoreRight || 1);
+        if (q.qType === 4 && q.choices) {
+            // TKA mode: count total pairs for determining max possible
+            const pairCount = q.choices.length || 1;
+            return sum + (pairCount * qScoreRight);
+        }
+        return sum + qScoreRight;
+    }
+    if (q.qType === 2 || q.qType === 3) {
+        return sum + (q.essayMaxScore ?? 100);
+    } else if (q.qType === 4) {
+        return sum + q.choices.reduce((s:number, c:any) => s + (c.weight ?? 1), 0);
+    }
+    return sum + (session.scoreRight || 1);
+}, 0);
+
 const finalScore = maxRaw > 0 ? Math.round((rawScore / maxRaw) * maxScoreScale * 100) / 100 : 0;
 ---
 
 <AdminLayout title={`Detail Hasil: ${session.firstName}`}>
-    <div class="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 print:hidden">
+    <div class="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-            <nav class="flex text-sm text-surface-500 mb-2" aria-label="Breadcrumb">
+            <nav class="flex text-sm text-surface-500 mb-2 print:hidden" aria-label="Breadcrumb">
                 <ol class="inline-flex items-center space-x-1 md:space-x-2">
                     <li class="inline-flex items-center">
                         <a href="/admin/hasil" class="hover:text-primary-600 transition-colors">Laporan</a>
@@ -170,14 +266,14 @@ const finalScore = maxRaw > 0 ? Math.round((rawScore / maxRaw) * maxScoreScale *
                     </li>
                 </ol>
             </nav>
-            <h2 class="text-xl font-bold text-surface-800 flex items-center">
-                <a href={`/admin/hasil?testId=${session.testId}`} class="mr-3 p-1.5 rounded-lg hover:bg-surface-100 transition-colors text-surface-500">
+            <h2 class="text-xl font-bold text-surface-800 flex items-center print:text-2xl print:border-b print:border-surface-200 print:pb-4 print:mb-4 print:w-full">
+                <a href={`/admin/hasil?testId=${session.testId}`} class="mr-3 p-1.5 rounded-lg hover:bg-surface-100 transition-colors text-surface-500 print:hidden">
                     <i class="icon-arrow-left w-5 h-5"></i>
                 </a>
-                Analisis Butir Soal: {session.firstName}
+                Analisis Hasil Ujian: {session.firstName}
             </h2>
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 print:hidden">
             <button onclick="window.print()" class="px-4 py-2 bg-white border border-surface-200 text-surface-700 text-sm font-medium rounded-lg hover:bg-surface-50 transition shadow-sm flex items-center gap-2">
                 <i class="icon-printer w-4 h-4"></i> Cetak Analisis
             </button>
@@ -240,7 +336,7 @@ const finalScore = maxRaw > 0 ? Math.round((rawScore / maxRaw) * maxScoreScale *
             </div>
         </div>
 
-        {processedQuestions.map((q, idx) => (
+        {processedQuestions.map((q: any, idx: number) => (
             <div class={`bg-white rounded-2xl border overflow-hidden shadow-sm transition-all ${
                 q.status === 'correct' ? 'border-emerald-100' : 
                 q.status === 'wrong' ? 'border-rose-100' : 'border-surface-200'
@@ -256,22 +352,22 @@ const finalScore = maxRaw > 0 ? Math.round((rawScore / maxRaw) * maxScoreScale *
                         }`}>
                             {q.orderIdx}
                         </span>
-                        <span class="text-xs font-bold uppercase tracking-wider text-surface-500">Soal {q.qType === 1 ? 'PG' : 'Esai'}</span>
+                        <span class="text-xs font-bold uppercase tracking-wider text-surface-500">Soal {q.qType === 1 ? 'PG' : q.qType === 5 ? 'PG Kompleks' : q.qType === 4 ? 'Menjodohkan' : q.qType === 6 ? 'Benar / Salah' : q.qType === 3 ? 'Singkat' : 'Esai'}</span>
                     </div>
                     <div class="flex items-center gap-2">
-                        {q.status === 'correct' && <span class="text-[10px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded uppercase">Benar (Kunci: {q.correctKey})</span>}
-                        {q.status === 'wrong' && <span class="text-[10px] font-black text-rose-600 bg-rose-100 px-2 py-0.5 rounded uppercase">Salah (Kunci: {q.correctKey})</span>}
-                        {q.status === 'unanswered' && <span class="text-[10px] font-black text-rose-600 bg-rose-100 px-2 py-0.5 rounded uppercase underline">Kosong (Kunci: {q.correctKey})</span>}
-                        <span class="text-xs font-mono font-bold text-surface-400">{q.earnedPoints > 0 ? '+' : ''}{q.earnedPoints} Poin</span>
+                        {q.status === 'correct' && <span class="text-[10px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded uppercase">Benar {q.qType === 1 ? `(Kunci: ${q.correctKey})` : ''}</span>}
+                        {q.status === 'wrong' && <span class="text-[10px] font-black text-rose-600 bg-rose-100 px-2 py-0.5 rounded uppercase">Salah {q.qType === 1 ? `(Kunci: ${q.correctKey})` : ''}</span>}
+                        {q.status === 'unanswered' && <span class="text-[10px] font-black text-rose-600 bg-rose-100 px-2 py-0.5 rounded uppercase underline">Kosong {q.qType === 1 ? `(Kunci: ${q.correctKey})` : ''}</span>}
+                        <span class={`text-xs font-mono font-bold ${q.earnedPoints > 0 ? 'text-emerald-600' : 'text-surface-400'}`}>{q.earnedPoints > 0 ? '+' : ''}{Math.round(q.earnedPoints * 100)/100} Poin</span>
                     </div>
                 </div>
 
                 <div class="p-6">
                     <div class="prose prose-sm max-w-none text-surface-800 mb-6" set:html={q.qText} />
 
-                    {q.qType === 1 && (
+                    {(q.qType === 1 || q.qType === 5) && (
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {q.choices.map((choice, cIdx) => {
+                            {q.choices.map((choice: any, cIdx: number) => {
                                 const isUserSelected = choice.isSelected;
                                 const isCorrect = choice.isCorrect;
                                 
@@ -291,11 +387,124 @@ const finalScore = maxRaw > 0 ? Math.round((rawScore / maxRaw) * maxScoreScale *
                                             {charMap[cIdx] || '?'}
                                         </span>
                                         <div class="flex-1">
-                                            <div set:html={choice.ansText} />
+                                            <Fragment set:html={choice.ansText}></Fragment>
                                         </div>
                                     </div>
                                 );
                             })}
+                        </div>
+                    )}
+                    
+                    {q.qType === 4 && (
+                        <div class="mt-4 bg-emerald-50 rounded-xl p-4 border border-emerald-100/60">
+                            <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-widest mb-3 flex items-center">
+                                <i class="icon-link w-3.5 h-3.5 mr-1.5 opacity-70"></i> Pasangan Jawaban
+                            </p>
+                            <div class="space-y-3">
+                                {q.choices.map((c: any) => {
+                                    const studentAnswer = q.savedMatches?.[c.ansId] || '<span class="italic opacity-50">Kosong</span>';
+                                    const isMatched = q.savedMatches?.[c.ansId] && q.savedMatches[c.ansId].trim() === c.matchRight?.trim();
+                                    return (
+                                        <div class="flex flex-col sm:flex-row gap-2 bg-white p-3 rounded-lg border border-slate-200">
+                                           <div class="flex-1 text-sm font-medium text-slate-700">{c.ansText}</div>
+                                           <div class="w-full sm:w-1/2 flex flex-col gap-1.5 shrink-0">
+                                               <div class="flex items-center gap-2">
+                                                  <span class="text-xs text-slate-500 w-16 uppercase tracking-wider font-bold">Kunci:</span>
+                                                  <span class="text-sm font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded flex-1 line-clamp-2" title={c.matchRight}>{c.matchRight}</span>
+                                               </div>
+                                               <div class="flex items-center gap-2">
+                                                  <span class="text-xs text-slate-500 w-16 uppercase tracking-wider font-bold">Jawaban:</span>
+                                                  <span class={`text-sm flex-1 flex items-center line-clamp-2 ${isMatched ? 'text-emerald-700 font-semibold border border-dashed border-emerald-300 px-2 py-0.5 rounded' : 'text-rose-600'}`} title={studentAnswer.replace(/<[^>]+>/g, '')}>
+                                                      <span class="flex-1 leading-snug"><Fragment set:html={studentAnswer}></Fragment></span>
+                                                      {isMatched ? <i class="icon-check-circle w-4 h-4 shrink-0 text-emerald-500 ml-1"></i> : <i class="icon-x-circle w-4 h-4 shrink-0 text-rose-400 ml-1"></i>}
+                                                  </span>
+                                               </div>
+                                           </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <div class="mt-4 pt-3 border-t border-emerald-100 flex items-center justify-between text-xs font-semibold text-emerald-800">
+                                <span>Poin Diperoleh: <span class="text-sm border ml-1 px-2 py-0.5 rounded-full bg-white border-emerald-200 font-mono font-bold text-emerald-600">{q.earnedPoints}</span></span>
+                                <span>Total Bobot: <span class="text-sm font-mono opacity-80 bg-emerald-100 px-2 py-0.5 rounded">{q.choices.reduce((s:number, c:any) => s + (c.weight ?? 1), 0)}</span></span>
+                            </div>
+                        </div>
+                    )}
+
+                    {(q.qType === 2 || q.qType === 3) && (
+                        <div class="mt-4 space-y-3">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="bg-surface-50 p-4 rounded-xl border border-surface-200">
+                                    <p class="text-[10px] uppercase font-black tracking-widest text-surface-400 mb-2 flex items-center gap-2">
+                                        <div class="w-2 h-2 rounded-full bg-rose-500 shrink-0"></div>
+                                        Jawaban Siswa
+                                    </p>
+                                    <div class="text-sm text-surface-700 whitespace-pre-wrap leading-relaxed">
+                                        {q.answerText && q.answerText.trim() ? q.answerText : <span class="text-surface-400 italic">Tidak ada jawaban.</span>}
+                                    </div>
+                                </div>
+                                <div class="bg-surface-50 p-4 rounded-xl border border-surface-200">
+                                    <p class="text-[10px] uppercase font-black tracking-widest text-surface-400 mb-2 flex items-center gap-2">
+                                        <div class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></div>
+                                        Kunci Jawaban Teks
+                                    </p>
+                                    <div class="text-sm text-surface-700 whitespace-pre-wrap leading-relaxed">
+                                        {q.essayCorrectAnswer || <span class="text-surface-400 italic">Tidak ada kunci teks dari guru.</span>}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Inline grading panel — khusus TKA */}
+                            {isTkaDetail && (
+                                <div
+                                    class="border border-indigo-200 bg-indigo-50/40 rounded-xl p-4"
+                                    id={`grade-panel-${q.tqId}`}
+                                >
+                                    <p class="text-[10px] uppercase font-black tracking-widest text-indigo-500 mb-3 flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                        Nilai Manual Guru
+                                    </p>
+                                    <div class="flex flex-wrap items-end gap-4">
+                                        <div>
+                                            <label class="block text-xs text-indigo-700 font-semibold mb-1">Skor (0 – {q.essayMaxScore ?? 100})</label>
+                                            <div class="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max={q.essayMaxScore ?? 100}
+                                                    step="0.5"
+                                                    value={Math.round(((q.essayScoreOverride ?? q.score) || 0) * 10) / 10}
+                                                    class="detail-score-input w-24 px-3 py-2 border-2 border-indigo-200 bg-white rounded-lg text-sm font-bold text-center focus:border-indigo-500 focus:outline-none transition"
+                                                    data-tq-id={q.tqId}
+                                                    data-max={q.essayMaxScore ?? 100}
+                                                />
+                                                <span class="text-xs text-indigo-500">/ {q.essayMaxScore ?? 100}</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex-1 min-w-[180px]">
+                                            <label class="block text-xs text-indigo-700 font-semibold mb-1">Catatan Guru (opsional)</label>
+                                            <input
+                                                type="text"
+                                                class="detail-notes-input w-full px-3 py-2 border border-indigo-200 bg-white rounded-lg text-sm focus:border-indigo-500 focus:outline-none"
+                                                placeholder="Komentar feedback..."
+                                                data-tq-id={q.tqId}
+                                            />
+                                        </div>
+                                        <button
+                                            type="button"
+                                            class="detail-save-btn flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition shadow-sm"
+                                            data-tq-id={q.tqId}
+                                            onclick={`saveDetailGrade(${q.tqId})`}
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                            Simpan Nilai
+                                        </button>
+                                    </div>
+                                    <p class="detail-saved-msg-${q.tqId} text-[11px] text-emerald-600 font-semibold mt-2 hidden" id={`saved-msg-${q.tqId}`}>
+                                        ✓ Nilai berhasil disimpan!
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -310,3 +519,77 @@ const finalScore = maxRaw > 0 ? Math.round((rawScore / maxRaw) * maxScoreScale *
         </div>
     )}
 </AdminLayout>
+
+<script>
+    window.saveDetailGrade = async (tqId) => {
+        const scoreInput = document.querySelector(`.detail-score-input[data-tq-id="${tqId}"]`);
+        const notesInput = document.querySelector(`.detail-notes-input[data-tq-id="${tqId}"]`);
+        const saveBtn = document.querySelector(`.detail-save-btn[data-tq-id="${tqId}"]`);
+        const savedMsg = document.getElementById(`saved-msg-${tqId}`);
+
+        if (!scoreInput) return;
+
+        const score = parseFloat(scoreInput.value);
+        const max = parseFloat(scoreInput.getAttribute('data-max') || '100');
+
+        if (isNaN(score) || score < 0 || score > max) {
+            alert(`Skor harus antara 0 dan ${max}`);
+            return;
+        }
+
+        const originalHtml = saveBtn.innerHTML;
+        saveBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> Menyimpan...`;
+        saveBtn.disabled = true;
+
+        try {
+            const res = await fetch('/api/admin/koreksi-esai', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    testQuestionId: tqId,
+                    score,
+                    notes: notesInput?.value || null,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                // Update the earned points badge in the question header
+                const panel = document.getElementById(`grade-panel-${tqId}`);
+                if (panel) {
+                    // Find the points display in the header (sibling elements up the DOM)
+                    const card = panel.closest('.bg-white.rounded-2xl');
+                    const pointsEl = card?.querySelector('.font-mono.font-bold');
+                    if (pointsEl) {
+                        pointsEl.textContent = `+${score} Poin`;
+                        pointsEl.className = 'text-xs font-mono font-bold text-emerald-600';
+                    }
+                }
+
+                if (savedMsg) {
+                    savedMsg.classList.remove('hidden');
+                    setTimeout(() => savedMsg.classList.add('hidden'), 3000);
+                }
+
+                saveBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Tersimpan`;
+                saveBtn.classList.replace('bg-indigo-600', 'bg-emerald-600');
+                saveBtn.classList.replace('hover:bg-indigo-500', 'hover:bg-emerald-500');
+                setTimeout(() => {
+                    saveBtn.innerHTML = originalHtml;
+                    saveBtn.classList.replace('bg-emerald-600', 'bg-indigo-600');
+                    saveBtn.classList.replace('hover:bg-emerald-500', 'hover:bg-indigo-500');
+                    saveBtn.disabled = false;
+                }, 2500);
+            } else {
+                alert('Gagal menyimpan: ' + (data.error || 'Kesalahan server'));
+                saveBtn.innerHTML = originalHtml;
+                saveBtn.disabled = false;
+            }
+        } catch (e) {
+            alert('Terjadi kesalahan jaringan.');
+            saveBtn.innerHTML = originalHtml;
+            saveBtn.disabled = false;
+        }
+    };
+</script>

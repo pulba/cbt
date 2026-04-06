@@ -51,9 +51,11 @@ export const questions = sqliteTable('questions', {
 // Pilihan Jawaban (untuk PG)
 export const questionAnswers = sqliteTable('question_answers', {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    questionId: integer('question_id').references(() => questions.id),
-    text: text('text').notNull(),
-    isCorrect: integer('is_correct', { mode: 'boolean' }).default(false),
+    questionId: integer('question_id').references(() => questions.id).notNull(),
+    text: text('text').notNull(), // Untuk PG: teks opsi. Untuk Menjodohkan: Teks Kiri
+    isCorrect: integer('is_correct', { mode: 'boolean' }).default(false), // true if this is the correct answer for PG
+    matchRight: text('match_right'), // Sisi Kanan (Khusus Menjodohkan/Type 4)
+    weight: real('weight').default(1), // Bobot per pasangan (Khusus Menjodohkan)
 });
 
 // Konfigurasi Aplikasi
@@ -68,6 +70,7 @@ export const tests = sqliteTable('tests', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     name: text('name').notNull(),
     detail: text('detail'),
+    mode: text('mode').default('standard'), // 'standard' | 'tka'
     scoreRight: real('score_right').default(1),
     scoreWrong: real('score_wrong').default(0),
     scoreUnanswered: real('score_unanswered').default(0),
@@ -75,6 +78,7 @@ export const tests = sqliteTable('tests', {
     showResult: integer('show_result', { mode: 'boolean' }).default(false),
     showDetail: integer('show_detail', { mode: 'boolean' }).default(false),
     isActive: integer('is_active', { mode: 'boolean' }).default(true),
+    tkaScoreConfig: text('tka_score_config'), // JSON: {"1":1,"2":100,"3":100,"4":1,"5":1,"6":1}
 });
 
 // Grup yang bisa mengerjakan Tes
@@ -89,7 +93,7 @@ export const testTopicSets = sqliteTable('test_topic_sets', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     testId: integer('test_id').references(() => tests.id).notNull(),
     topicId: integer('topic_id').references(() => topics.id).notNull(),
-    questionType: integer('question_type').notNull(), // 1: PG, 2: Essay, 3: Short
+    questionType: integer('question_type').notNull(), // 1:PG, 2:Essay, 3:Short, 4:Match, 5:Ceklis, 6:BenarSalah
     questionCount: integer('question_count').notNull(),
     difficulty: integer('difficulty').default(0), // 0=all
     shuffleQuestions: integer('shuffle_questions', { mode: 'boolean' }).default(true),
@@ -98,6 +102,8 @@ export const testTopicSets = sqliteTable('test_topic_sets', {
     beginTime: integer('begin_time', { mode: 'timestamp' }),
     endTime: integer('end_time', { mode: 'timestamp' }),
     durationMinutes: integer('duration_minutes').notNull().default(60),
+    scoreRightOverride: real('score_right_override'), // null = use global
+    scoreWrongOverride: real('score_wrong_override'), // null = use global
 });
 
 
@@ -123,6 +129,21 @@ export const testQuestions = sqliteTable('test_questions', {
     isAnswered: integer('is_answered', { mode: 'boolean' }).default(false), // true if student submitted any answer
     isDoubtful: integer('is_doubtful', { mode: 'boolean' }).default(false),
     audioPlayCount: integer('audio_play_count').default(0),
+    // Essay manual grading fields
+    essayScoreOverride: real('essay_score_override'), // guru override this score
+    essayGradedBy: integer('essay_graded_by'), // admin id who graded
+    essayGradedAt: integer('essay_graded_at', { mode: 'timestamp' }), // when graded
+    essayNotes: text('essay_notes'), // teacher's notes/feedback
+});
+
+// Konfigurasi penilaian soal esai
+export const essayConfigs = sqliteTable('essay_configs', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    questionId: integer('question_id').references(() => questions.id).notNull().unique(),
+    correctAnswer: text('correct_answer'), // Kunci/jawaban rujukan
+    keywords: text('keywords').default('[]'), // JSON: [{word, score, synonyms?}]
+    gradingMode: text('grading_mode').default('manual'), // 'keyword' | 'manual' | 'hybrid'
+    maxScore: real('max_score').default(100), // Skor maksimal soal ini
 });
 
 // Opsi Acak per Soal per Siswa

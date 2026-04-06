@@ -7,7 +7,7 @@ import { eq, and, lt, sql } from "drizzle-orm";
 export const POST: APIRoute = async ({ request }) => {
     try {
         const body = await request.json();
-        const { testId, topicId, questionCount, questionType = 1, shuffleQuestions, shuffleAnswers, durationMinutes, beginTime, endTime } = body;
+        const { testId, topicId, questionCount, questionType = 1, shuffleQuestions, shuffleAnswers, durationMinutes, beginTime, endTime, scoreRightOverride, scoreWrongOverride } = body;
 
         if (!testId || !topicId || !questionCount || questionCount <= 0 || !durationMinutes) {
             return new Response(JSON.stringify({ status: 0, message: "Invalid parameters" }), { status: 400 });
@@ -20,13 +20,16 @@ export const POST: APIRoute = async ({ request }) => {
         }
 
         // Before adding, check if we have enough questions in the bank for this exact topic & type
+        // For questionType 7 (Campuran/TKA), count ALL questions in the topic regardless of individual type
         const [available] = await db.select({ count: sql<number>`count(*)` })
             .from(questions)
             .where(
-                and(
-                    eq(questions.topicId, topicId),
-                    eq(questions.type, questionType)
-                )
+                questionType === 7
+                    ? eq(questions.topicId, topicId)
+                    : and(
+                        eq(questions.topicId, topicId),
+                        eq(questions.type, questionType)
+                    )
             );
 
         if (available.count < questionCount) {
@@ -49,6 +52,19 @@ export const POST: APIRoute = async ({ request }) => {
             return new Response(JSON.stringify({ status: 0, message: "Topik dengan tipe soal yang sama sudah ada di blueprint ujian ini." }), { status: 400 });
         }
 
+        // Get Test Details for Auto TKA Scores
+        const testData = await db.select().from(tests).where(eq(tests.id, testId)).get();
+        let finalScoreRight = scoreRightOverride !== undefined && scoreRightOverride !== "" ? parseFloat(scoreRightOverride) : null;
+        
+        if (finalScoreRight === null && testData?.mode === 'tka' && testData?.tkaScoreConfig) {
+            try {
+                const config = JSON.parse(testData.tkaScoreConfig);
+                if (config[questionType] !== undefined) {
+                    finalScoreRight = parseFloat(config[questionType]);
+                }
+            } catch (e) {}
+        }
+
         // Insert new topic set rules
         await db.insert(testTopicSets).values({
             testId,
@@ -61,7 +77,9 @@ export const POST: APIRoute = async ({ request }) => {
             answerCount: 4, // default to 4 for PG
             durationMinutes: parseInt(durationMinutes) || 60,
             beginTime: beginTime ? new Date(beginTime) : null,
-            endTime: endTime ? new Date(endTime) : null
+            endTime: endTime ? new Date(endTime) : null,
+            scoreRightOverride: finalScoreRight,
+            scoreWrongOverride: scoreWrongOverride !== undefined && scoreWrongOverride !== "" ? parseFloat(scoreWrongOverride) : null
         });
 
         return new Response(JSON.stringify({ status: 1, message: "Topik berhasil ditambahkan" }), {

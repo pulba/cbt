@@ -43,7 +43,7 @@ if (path.startsWith('/api/auth/')) return next();
 if (path === '/siswa' || path === '/siswa/') return next();
 
 // Student exam pages -> protected
-    if (path.startsWith('/siswa/ujian') || path.startsWith('/siswa/kerjakan') || path.startsWith('/siswa/konfirmasi')) {
+    if (path.startsWith('/siswa/ujian') || path.startsWith('/siswa/kerjakan') || path.startsWith('/siswa/konfirmasi') || path.startsWith('/siswa/tka')) {
     const token = cookies.get('cbt_student_session')?.value;
     if (!token) return redirect('/siswa');
     const user = await verifyToken(token, secret);

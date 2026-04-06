@@ -75,6 +75,48 @@ export const POST: APIRoute = async ({ request, locals }) => {
             return new Response(JSON.stringify({ status: 1 }));
         }
 
+        if (action === "toggle_answer") {
+            if (!answerId || !Number.isInteger(answerId) || answerId <= 0) {
+                return new Response(JSON.stringify({ status: 0, message: "answerId tidak valid" }), { status: 400 });
+            }
+
+            // Get current state
+            const current = await db.select({ isSelected: testQuestionAnswers.isSelected })
+                .from(testQuestionAnswers)
+                .where(and(
+                    eq(testQuestionAnswers.testQuestionId, testQuestionId),
+                    eq(testQuestionAnswers.answerId, answerId)
+                ))
+                .limit(1);
+
+            const newState = current.length > 0 ? !current[0].isSelected : true;
+
+            await db.update(testQuestionAnswers)
+                .set({ isSelected: newState })
+                .where(and(
+                    eq(testQuestionAnswers.testQuestionId, testQuestionId),
+                    eq(testQuestionAnswers.answerId, answerId)
+                ))
+                .run();
+
+            // Check if any options are still selected
+            const anySelected = await db.select({ id: testQuestionAnswers.id })
+                .from(testQuestionAnswers)
+                .where(and(
+                    eq(testQuestionAnswers.testQuestionId, testQuestionId),
+                    eq(testQuestionAnswers.isSelected, true)
+                ))
+                .limit(1);
+
+            await db.update(testQuestions)
+                .set({ isAnswered: anySelected.length > 0 })
+                .where(eq(testQuestions.id, testQuestionId))
+                .run();
+
+            appendLog(`toggle_answer SUCCESS for ${testQuestionId}, ans=${answerId}, newState=${newState}`);
+            return new Response(JSON.stringify({ status: 1, isSelected: newState }));
+        }
+
         if (action === "answer") {
             if (!answerId || !Number.isInteger(answerId) || answerId <= 0) {
                 return new Response(JSON.stringify({ status: 0, message: "answerId tidak valid" }), { status: 400 });

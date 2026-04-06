@@ -66,7 +66,7 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
                     1. Identitas Ujian & Waktu
                 </h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="md:col-span-2">
+                    <div class="md:col-span-1">
                         <label
                             for="name"
                             class="block text-sm font-medium text-surface-700 mb-1.5"
@@ -82,6 +82,25 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
                             class="w-full px-4 py-2.5 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
                         />
                     </div>
+                    <div class="md:col-span-1">
+                        <label
+                            for="mode"
+                            class="block text-sm font-medium text-surface-700 mb-1.5"
+                            >Mode Ujian</label
+                        >
+                        <select
+                            id="mode"
+                            name="mode"
+                            class="w-full px-4 py-2.5 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800"
+                        >
+                            <option value="standard" selected
+                                >Reguler / Standar</option
+                            >
+                            <option value="tka"
+                                >Campuran Tersistem (Khusus TKA)</option
+                            >
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -93,7 +112,7 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
                     2. Sistem Penilaian & Aturan
                 </h3>
 
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
                     <div>
                         <label
                             for="maxScore"
@@ -108,7 +127,9 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
                             value="100"
                             class="w-full px-4 py-2.5 bg-primary-50 border border-primary-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-primary-900 font-bold"
                         />
-                        <p class="text-[10px] text-surface-400 mt-1">Nilai tertinggi yang bisa didapat.</p>
+                        <p class="text-[10px] text-surface-400 mt-1">
+                            Nilai tertinggi yang bisa didapat.
+                        </p>
                     </div>
                     <div>
                         <label
@@ -125,40 +146,126 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
                             class="w-full px-4 py-2.5 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800 font-mono"
                         />
                     </div>
-                    <div>
-                        <label
-                            for="scoreWrong"
-                            class="block text-sm font-medium text-surface-700 mb-1.5"
-                            >Poin Salah</label
+                </div>
+
+                <!-- TKA Per-Type Scoring Panel -->
+                <div
+                    id="tka-scoring-panel"
+                    class="hidden my-4 border border-indigo-200 bg-indigo-50/40 rounded-xl p-5"
+                >
+                    <h4
+                        class="text-sm font-bold text-indigo-700 mb-1 flex items-center gap-2"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="w-4 h-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            ><path
+                                d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                            ></path><path
+                                d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                            ></path></svg
                         >
-                        <input
-                            type="number"
-                            step="0.1"
-                            id="scoreWrong"
-                            name="scoreWrong"
-                            value="0"
-                            class="w-full px-4 py-2.5 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800 font-mono"
-                        />
-                    </div>
-                    <div>
-                        <label
-                            for="scoreUnanswered"
-                            class="block text-sm font-medium text-surface-700 mb-1.5"
-                            >Poin Kosong</label
-                        >
-                        <input
-                            type="number"
-                            step="0.1"
-                            id="scoreUnanswered"
-                            name="scoreUnanswered"
-                            value="0"
-                            class="w-full px-4 py-2.5 bg-white border border-surface-200 rounded-lg text-sm transition focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-surface-800 font-mono"
-                        />
+                        Poin Benar Per Jenis Soal (TKA)
+                    </h4>
+                    <p class="text-[11px] text-indigo-500 mb-4">
+                        Atur poin mentah untuk setiap jenis soal. Nilai ini akan
+                        menjadi default saat menambah topik di blueprint.
+                    </p>
+                    <div
+                        class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"
+                    >
+                        <div>
+                            <label
+                                class="block text-[11px] font-semibold text-indigo-600 mb-1"
+                                >Pilihan Ganda</label
+                            >
+                            <input
+                                type="number"
+                                step="0.1"
+                                id="tkaPg"
+                                name="tkaPg"
+                                value="1"
+                                class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition"
+                            />
+                        </div>
+                        <div>
+                            <label
+                                class="block text-[11px] font-semibold text-indigo-600 mb-1"
+                                >Esai</label
+                            >
+                            <input
+                                type="number"
+                                step="0.1"
+                                id="tkaEsai"
+                                name="tkaEsai"
+                                value="100"
+                                class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition"
+                            />
+                        </div>
+                        <div>
+                            <label
+                                class="block text-[11px] font-semibold text-indigo-600 mb-1"
+                                >Jaw. Singkat</label
+                            >
+                            <input
+                                type="number"
+                                step="0.1"
+                                id="tkaSingkat"
+                                name="tkaSingkat"
+                                value="100"
+                                class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition"
+                            />
+                        </div>
+                        <div>
+                            <label
+                                class="block text-[11px] font-semibold text-indigo-600 mb-1"
+                                >Menjodohkan</label
+                            >
+                            <input
+                                type="number"
+                                step="0.1"
+                                id="tkaJodoh"
+                                name="tkaJodoh"
+                                value="1"
+                                class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition"
+                            />
+                        </div>
+                        <div>
+                            <label
+                                class="block text-[11px] font-semibold text-indigo-600 mb-1"
+                                >Ceklis</label
+                            >
+                            <input
+                                type="number"
+                                step="0.1"
+                                id="tkaCeklis"
+                                name="tkaCeklis"
+                                value="1"
+                                class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition"
+                            />
+                        </div>
+                        <div>
+                            <label
+                                class="block text-[11px] font-semibold text-indigo-600 mb-1"
+                                >Benar / Salah</label
+                            >
+                            <input
+                                type="number"
+                                step="0.1"
+                                id="tkaBs"
+                                name="tkaBs"
+                                value="1"
+                                class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-center focus:border-indigo-500 focus:outline-none transition"
+                            />
+                        </div>
                     </div>
                 </div>
 
                 <div class="flex flex-wrap gap-x-8 gap-y-4">
-
                     <label class="relative flex cursor-pointer items-center">
                         <input
                             type="checkbox"
@@ -193,43 +300,7 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
                 </div>
             </div>
 
-            <!-- Bagian 3: Instruksi Tes -->
-            <div>
-                <label class="block text-sm font-medium text-surface-700 mb-1.5"
-                    >Instruksi / Pengantar Ujian (Opsional)</label
-                >
-                <div
-                    class="bg-surface-50 border border-surface-200 rounded-t-lg border-b-0"
-                    id="toolbar-container"
-                >
-                    <span class="ql-formats">
-                        <button class="ql-bold"></button>
-                        <button class="ql-italic"></button>
-                        <button class="ql-underline"></button>
-                    </span>
-                    <span class="ql-formats">
-                        <button class="ql-list" value="ordered"></button>
-                        <button class="ql-list" value="bullet"></button>
-                    </span>
-                    <span class="ql-formats">
-                        <button class="ql-link"></button>
-                        <button class="ql-image"></button>
-                    </span>
-                </div>
-                <div
-                    id="editor-container"
-                    class="bg-white min-h-[150px] rounded-b-lg text-base"
-                >
-                </div>
-                <p class="text-xs text-surface-500 mt-2">
-                    Dapat diisi instruksi cara pengerjaan, pedoman larangan
-                    mencontek, atau gambar logo selamat datang.
-                </p>
-            </div>
-
-            <div
-                class="pt-4 border-t border-surface-200 flex justify-end gap-3"
-            >
+            <div class="pt-4 border-t border-surface-200 flex justify-end gap-3">
                 <a
                     href="/admin/ujian"
                     class="px-5 py-2.5 bg-white border border-surface-200 text-surface-700 text-sm font-medium rounded-lg hover:bg-surface-50 transition"
@@ -254,15 +325,6 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
 </AdminLayout>
 
 <script>
-    // Initialize simple Quill editor for instructions
-    const quill = new (window as any).Quill("#editor-container", {
-        modules: {
-            toolbar: "#toolbar-container",
-        },
-        placeholder: "Ketikkan pengantar sesi ujian di sini...",
-        theme: "snow",
-    });
-
     const form = document.getElementById("tambah-form") as HTMLFormElement;
     const submitBtn = document.getElementById(
         "submit-btn",
@@ -277,20 +339,30 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
 
         // Get Form Data
         const formData = new FormData(form);
-        const submitData = {
+        const submitData: any = {
             name: formData.get("name"),
+            mode: formData.get("mode"),
             scoreRight: parseFloat(formData.get("scoreRight") as string) || 1,
-            scoreWrong: parseFloat(formData.get("scoreWrong") as string) || 0,
-            scoreUnanswered:
-                parseFloat(formData.get("scoreUnanswered") as string) || 0,
+            scoreWrong: 0,
+            scoreUnanswered: 0,
             maxScore: parseFloat(formData.get("maxScore") as string) || 100,
             showResult: formData.has("showResult"),
             showDetail: formData.has("showDetail"),
-            detail:
-                quill.root.innerHTML === "<p><br></p>"
-                    ? ""
-                    : quill.root.innerHTML,
+            detail: "",
         };
+
+        // Include TKA per-type scores if mode is TKA
+        if (submitData.mode === "tka") {
+            submitData.tkaScores = {
+                pg: parseFloat(formData.get("tkaPg") as string) || 1,
+                esai: parseFloat(formData.get("tkaEsai") as string) || 100,
+                singkat:
+                    parseFloat(formData.get("tkaSingkat") as string) || 100,
+                jodoh: parseFloat(formData.get("tkaJodoh") as string) || 1,
+                ceklis: parseFloat(formData.get("tkaCeklis") as string) || 1,
+                bs: parseFloat(formData.get("tkaBs") as string) || 1,
+            };
+        }
 
         // Loading state
         submitBtn.disabled = true;
@@ -319,7 +391,11 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
             }
 
             // Success, instantly route to blueprint config
-            window.location.href = `/admin/ujian/blueprint/${data.data.id}`;
+            if (submitData.mode === 'tka') {
+                window.location.href = `/admin/tka/blueprint/${data.data.id}`;
+            } else {
+                window.location.href = `/admin/ujian/blueprint/${data.data.id}`;
+            }
         } catch (err: any) {
             if (errorAlert && errorMsg) {
                 errorMsg.innerText =
@@ -332,4 +408,18 @@ import AdminLayout from "../../../layouts/AdminLayout.astro";
             document.getElementById("btn-spinner")!.classList.add("hidden");
         }
     });
+
+    // Toggle TKA scoring panel visibility based on mode selection
+    const modeSelect = document.getElementById("mode");
+    const tkaPanel = document.getElementById("tka-scoring-panel");
+    const scoreRightRow = document.getElementById("scoreRight")?.closest("div");
+
+    function toggleTkaPanel() {
+        const isTka = (modeSelect as HTMLSelectElement)?.value === "tka";
+        if (tkaPanel) tkaPanel.classList.toggle("hidden", !isTka);
+        if (scoreRightRow) scoreRightRow.classList.toggle("hidden", isTka);
+    }
+
+    modeSelect?.addEventListener("change", toggleTkaPanel);
+    toggleTkaPanel(); // Run on load
 </script>

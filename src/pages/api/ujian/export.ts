@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { db } from '../../../db';
-import { tests, testUsers, testQuestions, testQuestionAnswers, questionAnswers, users, userGroups } from '../../../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { tests, testUsers, testQuestions, testQuestionAnswers, questionAnswers, users, userGroups, questions, essayConfigs } from '../../../db/schema';
+import { eq, and, inArray } from 'drizzle-orm';
 import * as XLSX from 'xlsx';
 
 export const GET: APIRoute = async ({ request, locals }) => {
@@ -39,52 +39,59 @@ export const GET: APIRoute = async ({ request, locals }) => {
             .orderBy(userGroups.name, users.firstName)
             .all();
 
-        // 3. Get all session questions and answers for bulk scoring
+        // 3. Get all session questions for exact scoring
         const allSessionQuestions = await db
             .select({
                 sessionId: testQuestions.testUserId,
                 qId: testQuestions.id,
+                questionId: testQuestions.questionId,
+                score: testQuestions.score,
+                qType: questions.type,
+                essayMaxScore: essayConfigs.maxScore
             })
             .from(testQuestions)
             .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
+            .innerJoin(questions, eq(testQuestions.questionId, questions.id))
+            .leftJoin(essayConfigs, eq(testQuestions.questionId, essayConfigs.questionId))
             .where(eq(testUsers.testId, testId))
             .all();
 
-        const allSessionSelected = await db
-            .select({
-                sessionId: testQuestions.testUserId,
-                isCorrect: questionAnswers.isCorrect,
-            })
-            .from(testQuestionAnswers)
-            .innerJoin(testQuestions, eq(testQuestionAnswers.testQuestionId, testQuestions.id))
-            .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
-            .innerJoin(questionAnswers, eq(testQuestionAnswers.answerId, questionAnswers.id))
-            .where(and(
-                eq(testUsers.testId, testId),
-                eq(testQuestionAnswers.isSelected, true)
-            ))
-            .all();
+        // Fetch weights for Type 4 questions to calculate max possible raw score
+        const type4QuestionIds = [...new Set(allSessionQuestions.filter(q => q.qType === 4).map(q => q.questionId))];
+        const type4Weights = new Map<number, number>();
+        if (type4QuestionIds.length > 0) {
+            const weights = await db.select({ qId: questionAnswers.questionId, weight: questionAnswers.weight })
+                .from(questionAnswers).where(inArray(questionAnswers.questionId, type4QuestionIds as number[])).all();
+            type4QuestionIds.forEach(qid => {
+                const totalW = weights.filter(w => w.qId === qid).reduce((s, w) => s + (w.weight ?? 1), 0);
+                type4Weights.set(qid, totalW);
+            });
+        }
 
         const scoreRight = test.scoreRight ?? 1;
-        const scoreWrong = test.scoreWrong ?? 0;
-        const scoreUnanswered = test.scoreUnanswered ?? 0;
         const maxScore = test.maxScore ?? 0;
 
         // 4. Prepare data for Excel
         const data = sessions.map((sess, idx) => {
             const sessionQs = allSessionQuestions.filter(q => q.sessionId === sess.sessionId);
-            const sessionSelected = allSessionSelected.filter(s => s.sessionId === sess.sessionId);
-
+            
             const total = sessionQs.length;
-            const correct = sessionSelected.filter(s => s.isCorrect).length;
-            const answered = sessionSelected.length;
-            const wrong = answered - correct;
-            const unanswered = total - answered;
+            const earnedRaw = sessionQs.reduce((sum, q) => sum + (q.score || 0), 0);
+            
+            // Calculate what a "perfect" raw score would be for this specific student's question set
+            const maxRaw = sessionQs.reduce((sum, q) => {
+                if (q.qType === 2 || q.qType === 3) return sum + (q.essayMaxScore ?? 100);
+                if (q.qType === 4) return sum + (type4Weights.get(q.questionId) ?? 1);
+                return sum + scoreRight;
+            }, 0);
 
-            const pgScore = (correct * scoreRight) + (wrong * scoreWrong) + (unanswered * scoreUnanswered);
-            const maxScoreScale = maxScore > 0 ? maxScore : 100;
-            const maxRaw = total * scoreRight;
-            const totalScore = maxRaw > 0 ? (pgScore / maxRaw) * maxScoreScale : 0;
+            const maxScale = maxScore > 0 ? maxScore : 100;
+            const finalScore = maxRaw > 0 ? (earnedRaw / maxRaw) * maxScale : 0;
+
+            // Simplified counts for Excel (PG and PGK)
+            const correct = sessionQs.filter(q => (q.qType === 1 || q.qType === 5) && q.score && q.score > 0).length;
+            const wrong = sessionQs.filter(q => (q.qType === 1 || q.qType === 5) && q.score === 0).length;
+            const empty = total - (sessionQs.filter(q => q.score !== null).length); // Approximate
 
             return {
                 "No": idx + 1,
@@ -94,9 +101,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
                 "Status": sess.status === 4 ? 'Selesai' : 'Berlangsung',
                 "Benar": correct,
                 "Salah": wrong,
-                "Kosong": unanswered,
+                "Kosong": total - (correct + wrong), 
                 "Total Soal": total,
-                "Nilai": totalScore
+                "Nilai": Math.round(finalScore * 100) / 100
             };
         });
 

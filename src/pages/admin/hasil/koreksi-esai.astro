@@ -1,0 +1,281 @@
+---
+import AdminLayout from "../../../layouts/AdminLayout.astro";
+import { db } from "../../../db";
+import {
+    tests,
+    testUsers,
+    testQuestions,
+    questions,
+    essayConfigs,
+    users,
+    userGroups,
+    testTopicSets,
+} from "../../../db/schema";
+import { eq, and, inArray, sql } from "drizzle-orm";
+
+const selectedTestId = Astro.url.searchParams.get("testId");
+
+// Only show tests that have at least one essay/short-answer question in their blueprint
+const essayTopicSets = await db
+    .selectDistinct({ testId: testTopicSets.testId })
+    .from(testTopicSets)
+    .where(inArray(testTopicSets.questionType, [2, 3]))
+    .all();
+const essayTestIds = essayTopicSets.map(r => r.testId);
+
+const allTests = essayTestIds.length > 0
+    ? await db
+        .select({ id: tests.id, name: tests.name })
+        .from(tests)
+        .where(inArray(tests.id, essayTestIds))
+        .orderBy(tests.id)
+        .all()
+    : [];
+
+
+interface EssayRow {
+    sessionId: number;
+    userId: number;
+    status: number;
+    firstName: string;
+    username: string;
+    groupName: string | null;
+    totalEssay: number;
+    gradedCount: number;
+    isPending: boolean;
+    autoGradedCount: number;
+}
+
+let essayRows: EssayRow[] = [];
+let selectedTest: { id: number; name: string } | null = null;
+let totalPendingCount = 0;
+
+if (selectedTestId) {
+    const testId = parseInt(selectedTestId);
+    selectedTest = allTests.find((t) => t.id === testId) ?? null;
+
+    const sessions = await db
+        .select({
+            sessionId: testUsers.id,
+            userId: testUsers.userId,
+            status: testUsers.status,
+            firstName: users.firstName,
+            username: users.username,
+            groupName: userGroups.name,
+        })
+        .from(testUsers)
+        .innerJoin(users, eq(testUsers.userId, users.id!))
+        .leftJoin(userGroups, eq(users.groupId, userGroups.id))
+        .where(eq(testUsers.testId, testId))
+        .orderBy(userGroups.name, users.firstName)
+        .all();
+
+    for (const sess of sessions) {
+        // Get essay questions for this session
+        const essayQs = await db
+            .select({
+                tqId: testQuestions.id,
+                qType: questions.type,
+                essayScoreOverride: testQuestions.essayScoreOverride,
+                essayGradedBy: testQuestions.essayGradedBy,
+                essayNotes: testQuestions.essayNotes,
+                isAnswered: testQuestions.isAnswered,
+                gradingMode: essayConfigs.gradingMode,
+            })
+            .from(testQuestions)
+            .innerJoin(questions, eq(testQuestions.questionId, questions.id))
+            .leftJoin(essayConfigs, eq(testQuestions.questionId, essayConfigs.questionId))
+            .where(eq(testQuestions.testUserId, sess.sessionId))
+            .all();
+
+        const essayOnly = essayQs.filter((q) => q.qType === 2 || q.qType === 3);
+        if (essayOnly.length === 0) continue;
+
+        const gradedCount = essayOnly.filter(
+            (q) => q.essayGradedBy !== null && q.essayGradedBy !== undefined
+        ).length;
+
+        const autoGradedCount = essayOnly.filter(
+            (q) => q.gradingMode === "keyword" || q.gradingMode === "hybrid"
+        ).length;
+
+        const isPending =
+            sess.status === 4 && gradedCount < essayOnly.filter((q) => q.gradingMode === "manual" || q.gradingMode === "hybrid").length;
+
+        if (isPending) totalPendingCount++;
+
+        essayRows.push({
+            sessionId: sess.sessionId,
+            userId: sess.userId!,
+            status: sess.status ?? 1,
+            firstName: sess.firstName,
+            username: sess.username,
+            groupName: sess.groupName,
+            totalEssay: essayOnly.length,
+            gradedCount,
+            isPending,
+            autoGradedCount,
+        });
+    }
+}
+---
+
+<AdminLayout title="Koreksi Esai">
+    <!-- Header -->
+    <div class="mb-6 flex flex-col sm:flex-row items-start justify-between gap-4">
+        <div>
+            <h2 class="text-xl font-bold text-surface-800 flex items-center gap-2">
+                <i class="icon-edit-3 w-5 h-5 text-indigo-500"></i>
+                Koreksi & Penilaian Esai
+            </h2>
+            <p class="text-sm text-surface-500 mt-1">Periksa jawaban esai siswa dan berikan nilai secara manual.</p>
+        </div>
+        {totalPendingCount > 0 && (
+            <div class="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm font-semibold">
+                <i class="icon-alert-circle w-4 h-4"></i>
+                {totalPendingCount} sesi perlu dikoreksi
+            </div>
+        )}
+    </div>
+
+    <!-- Filter -->
+    <div class="bg-white p-4 rounded-xl border border-surface-200 shadow-sm mb-6">
+        <form method="get" class="flex flex-wrap gap-4 items-end">
+            <div class="flex-1 min-w-[200px] max-w-sm">
+                <label class="block text-xs font-semibold text-surface-600 mb-1.5 uppercase tracking-wide">Pilih Ujian</label>
+                <select name="testId" class="w-full px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-700 focus:ring-indigo-400 focus:border-indigo-400">
+                    <option value="">-- Pilih Ujian --</option>
+                    {allTests.map((t) => (
+                        <option value={t.id} selected={selectedTestId === t.id.toString()}>{t.name}</option>
+                    ))}
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition shadow-sm">
+                Tampilkan
+            </button>
+            {selectedTestId && (
+                <a href={`/admin/hasil?testId=${selectedTestId}`} class="px-4 py-2 bg-surface-100 hover:bg-surface-200 text-surface-700 text-sm font-semibold rounded-lg transition border border-surface-200 flex items-center gap-1.5">
+                    <i class="icon-bar-chart-2 w-3.5 h-3.5"></i> Lihat Rekap Nilai
+                </a>
+            )}
+        </form>
+    </div>
+
+    {selectedTestId ? (
+        <div class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-surface-200 bg-indigo-50/50 flex flex-wrap gap-3 justify-between items-center">
+                <div>
+                    <h3 class="text-sm font-bold text-surface-700">
+                        Daftar Peserta Esai — <span class="text-indigo-600">{selectedTest?.name}</span>
+                    </h3>
+                    {essayRows.length > 0 && (
+                        <p class="text-xs text-surface-400 mt-0.5">{essayRows.length} siswa memiliki soal esai</p>
+                    )}
+                </div>
+
+                <!-- Legend -->
+                <div class="flex items-center gap-4 text-xs text-surface-500 font-medium">
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>Perlu Koreksi</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"></span>Sudah Dinilai</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-indigo-400 inline-block"></span>Auto-graded</span>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-surface-600">
+                    <thead class="bg-surface-50 border-b border-surface-200 text-surface-700 font-semibold text-xs uppercase tracking-wide">
+                        <tr>
+                            <th class="px-4 py-3 w-10 text-center">No</th>
+                            <th class="px-4 py-3">Nama / Kelas</th>
+                            <th class="px-4 py-3 text-center">Status Ujian</th>
+                            <th class="px-4 py-3 text-center">Soal Esai</th>
+                            <th class="px-4 py-3 text-center">Progress Koreksi</th>
+                            <th class="px-4 py-3 text-center">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-100">
+                        {essayRows.length === 0 ? (
+                            <tr>
+                                <td colspan="6" class="px-5 py-12 text-center text-surface-400">
+                                    <i class="icon-edit-3 w-10 h-10 mx-auto mb-3 block opacity-30"></i>
+                                    {selectedTestId ? "Tidak ada soal esai dalam ujian ini." : "Pilih ujian terlebih dahulu."}
+                                </td>
+                            </tr>
+                        ) : essayRows.map((r, idx) => (
+                            <tr class="hover:bg-surface-50/60 transition-colors group">
+                                <td class="px-4 py-3.5 text-center text-surface-400 text-xs font-mono">{idx + 1}</td>
+                                <td class="px-4 py-3.5">
+                                    <div class="font-bold text-surface-800 group-hover:text-indigo-700 transition-colors">{r.firstName}</div>
+                                    <div class="flex items-center gap-2 mt-0.5">
+                                        <span class="text-[10px] text-surface-400 font-mono">{r.username}</span>
+                                        {r.groupName && <span class="text-[10px] text-surface-400">· {r.groupName}</span>}
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3.5 text-center">
+                                    {r.status === 4 ? (
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold uppercase">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>Selesai
+                                        </span>
+                                    ) : (
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-bold uppercase">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block"></span>Berlangsung
+                                        </span>
+                                    )}
+                                </td>
+                                <td class="px-4 py-3.5 text-center">
+                                    <span class="font-bold text-surface-800">{r.totalEssay}</span>
+                                    <span class="text-surface-400 text-xs ml-1">soal</span>
+                                    {r.autoGradedCount > 0 && (
+                                        <div class="text-[10px] text-indigo-500 mt-0.5">{r.autoGradedCount} auto-graded</div>
+                                    )}
+                                </td>
+                                <td class="px-4 py-3.5 text-center">
+                                    <div class="flex flex-col items-center gap-1">
+                                        <div class="w-24 bg-surface-200 rounded-full h-2 overflow-hidden">
+                                            <div
+                                                class="h-full rounded-full transition-all"
+                                                class:list={[r.gradedCount === r.totalEssay ? "bg-emerald-500" : "bg-amber-400"]}
+                                                style={`width: ${r.totalEssay > 0 ? Math.round((r.gradedCount / r.totalEssay) * 100) : 0}%`}
+                                            ></div>
+                                        </div>
+                                        <span class="text-xs text-surface-500">
+                                            {r.gradedCount}/{r.totalEssay}
+                                            {r.isPending && <span class="text-amber-500 ml-1 font-semibold">Pending</span>}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3.5 text-center">
+                                    <a
+                                        href={`/admin/hasil/koreksi-esai/${r.sessionId}?testId=${selectedTestId}`}
+                                        class:list={[
+                                            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition border",
+                                            r.isPending
+                                                ? "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100"
+                                                : "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
+                                        ]}
+                                    >
+                                        <i class="icon-edit-2 w-3.5 h-3.5"></i>
+                                        {r.isPending ? "Koreksi" : "Lihat / Edit"}
+                                    </a>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            {essayRows.length > 0 && (
+                <div class="px-5 py-3 bg-indigo-50/30 border-t border-surface-100 text-xs text-surface-500">
+                    <span class="font-semibold text-indigo-600">{essayRows.filter(r => r.gradedCount === r.totalEssay).length}</span> sudah selesai ·
+                    <span class="font-semibold text-amber-600"> {essayRows.filter(r => r.isPending).length}</span> perlu koreksi
+                </div>
+            )}
+        </div>
+    ) : (
+        <div class="bg-surface-50 border border-surface-200 border-dashed rounded-2xl p-14 text-center text-surface-500">
+            <i class="icon-edit-3 w-12 h-12 mx-auto mb-4 block text-indigo-300"></i>
+            <p class="font-semibold text-surface-600">Pilih ujian untuk melihat daftar koreksi esai</p>
+            <p class="text-sm mt-1">Sistem akan menampilkan semua siswa yang memiliki soal esai dalam ujian tersebut.</p>
+        </div>
+    )}
+</AdminLayout>

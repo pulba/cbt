@@ -1,397 +1,50 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro';
-import { db } from '../../../db';
-import { tests, testUsers, testQuestions, testQuestionAnswers, questionAnswers, users, userGroups } from '../../../db/schema';
-import { eq, and, desc, count, sql } from 'drizzle-orm';
-
-// Fetch all tests for the selector
-const allTests = await db.select({ id: tests.id, name: tests.name }).from(tests).orderBy(desc(tests.id));
-
-const selectedTestId = Astro.url.searchParams.get('testId');
-const selectedTest = selectedTestId ? allTests.find(t => t.id === parseInt(selectedTestId)) : null;
-
-interface ResultRow {
-    sessionId: number;
-    userId: number;
-    firstName: string;
-    username: string;
-    groupName: string | null;
-    creationTime: Date | null;
-    status: number;
-    correct: number;
-    wrong: number;
-    unanswered: number;
-    totalQuestions: number;
-    scoreRight: number;
-    scoreWrong: number;
-    scoreUnanswered: number;
-    maxScore: number;
-    pgScore: number;
-    totalScore: number;
-}
-
-let results: ResultRow[] = [];
-let testConfig: { scoreRight: number; scoreWrong: number; scoreUnanswered: number; maxScore: number } | null = null;
-
-if (selectedTestId) {
-    const testId = parseInt(selectedTestId);
-    
-    // Get test scoring config
-    testConfig = await db
-        .select({
-            scoreRight: tests.scoreRight,
-            scoreWrong: tests.scoreWrong,
-            scoreUnanswered: tests.scoreUnanswered,
-            maxScore: tests.maxScore,
-        })
-        .from(tests)
-        .where(eq(tests.id, testId))
-        .get() as any;
-
-    // Get all sessions for this test that are finished (status = 4) or in progress
-    const sessions = await db
-        .select({
-            sessionId: testUsers.id,
-            userId: testUsers.userId,
-            status: testUsers.status,
-            creationTime: testUsers.creationTime,
-            firstName: users.firstName,
-            username: users.username,
-            groupName: userGroups.name,
-        })
-        .from(testUsers)
-        .innerJoin(users, eq(testUsers.userId, users.id))
-        .leftJoin(userGroups, eq(users.groupId, userGroups.id))
-        .where(eq(testUsers.testId, testId))
-        .orderBy(userGroups.name, users.firstName)
-        .all();
-
-    // For each session, count correct/wrong/unanswered
-    const scoreRight = testConfig?.scoreRight ?? 1;
-    const scoreWrong = testConfig?.scoreWrong ?? 0;
-    const scoreUnanswered = testConfig?.scoreUnanswered ?? 0;
-    const maxScore = testConfig?.maxScore ?? 0;
-
-    // Get all content for all sessions once
-    const allSessionQuestions = await db
-        .select({
-            sessionId: testQuestions.testUserId,
-            qId: testQuestions.id,
-            answerText: testQuestions.answerText,
-            score: testQuestions.score,
-            isAnswered: testQuestions.isAnswered,
-        })
-        .from(testQuestions)
-        .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
-        .where(eq(testUsers.testId, testId))
-        .all();
-
-    const allSessionSelected = await db
-        .select({
-            sessionId: testQuestions.testUserId,
-            isCorrect: questionAnswers.isCorrect,
-        })
-        .from(testQuestionAnswers)
-        .innerJoin(testQuestions, eq(testQuestionAnswers.testQuestionId, testQuestions.id))
-        .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
-        .innerJoin(questionAnswers, eq(testQuestionAnswers.answerId, questionAnswers.id))
-        .where(and(
-            eq(testUsers.testId, testId),
-            eq(testQuestionAnswers.isSelected, true)
-        ))
-        .all();
-
-    // Filter sessions to only show the BEST session per user
-    const latestSessionsMap = new Map<number, any>();
-    
-    // Pre-calculate answer counts for session selection
-    const sessionStats = sessions.map(sess => {
-        const qs = allSessionQuestions.filter(q => q.sessionId === sess.sessionId);
-        const sel = allSessionSelected.filter(s => s.sessionId === sess.sessionId);
-        const ansText = qs.filter(q => q.answerText && q.answerText.trim()).length;
-        return { ...sess, answerCount: sel.length + ansText };
-    });
-
-    sessionStats.forEach(sess => {
-        const existing = latestSessionsMap.get(sess.userId!);
-        // If finished (status 4) OR has more answers OR is newer, prefer it
-        if (!existing) {
-            latestSessionsMap.set(sess.userId!, sess);
-        } else {
-            const currentTotal = sess.answerCount;
-            const existingTotal = existing.answerCount;
-            
-            // Priority: Finished > More Answers > Higher SessionID
-            let replace = false;
-            if (sess.status === 4 && existing.status !== 4) replace = true;
-            else if (sess.status === existing.status) {
-                if (currentTotal > existingTotal) replace = true;
-                else if (currentTotal === existingTotal && sess.sessionId > existing.sessionId) replace = true;
-            } else if (sess.status !== 4 && existing.status !== 4) {
-                if (currentTotal > existingTotal) replace = true;
-            }
-
-            if (replace) latestSessionsMap.set(sess.userId!, sess);
-        }
-    });
-
-    const filteredSessions = Array.from(latestSessionsMap.values());
-
-    for (const sess of filteredSessions) {
-        // Skip completely empty sessions that are not finished (junk data)
-        const sessionQs = allSessionQuestions.filter(q => q.sessionId === sess.sessionId);
-        const sessionSelected = allSessionSelected.filter(s => s.sessionId === sess.sessionId);
-
-        const total = sessionQs.length;
-        if (total === 0 && sess.status !== 4) continue;
-
-        let correct = sessionSelected.filter(s => s.isCorrect).length;
-        let answeredPG = sessionSelected.length;
-        const answeredText = sessionQs.filter(q => q.answerText && q.answerText.trim()).length;
-        
-        // If there are answers based on the new `isAnswered` column that weren't caught 
-        // by the old `isSelected` join (e.g. essay or fallback logic), we account for them
-        const totalAnsweredFromFlags = sessionQs.filter(q => q.isAnswered).length;
-        
-        // We use whichever tells us more questions were answered
-        let answered = Math.max(answeredPG + answeredText, totalAnsweredFromFlags);
-        
-        // Recalculate if we rely on flags
-        if (totalAnsweredFromFlags > answeredPG + answeredText) {
-            // Count correct roughly based on score if we must fallback
-            correct = sessionQs.filter(q => q.isAnswered && q.score === scoreRight).length;
-            answeredPG = sessionQs.filter(q => q.isAnswered && (!q.answerText || q.answerText.trim() === '')).length;
-        }
-
-        const wrong = answeredPG - correct; // Essay answers are not counted as wrong until graded
-        const unanswered = Math.max(0, total - answered);
-
-        // Compute exact pgScore from saved scores in the database
-        const pgScore = sessionQs.reduce((sum, q) => sum + (q.score || 0), 0);
-        const maxScoreScale = maxScore > 0 ? maxScore : 100;
-        
-        // Only count PG questions for scaling if that's the current behavior
-        // Or count all if we want total grading. Let's stick to existing logic but fixed.
-        const pgQuestionsCount = sessionQs.length; // Actually all questions from blueprint
-        const maxRaw = pgQuestionsCount * scoreRight;
-        const totalScore = maxRaw > 0 ? (pgScore / maxRaw) * maxScoreScale : 0;
-
-        results.push({
-            sessionId: sess.sessionId,
-            userId: sess.userId!,
-            firstName: sess.firstName,
-            username: sess.username,
-            groupName: sess.groupName,
-            creationTime: sess.creationTime,
-            status: sess.status ?? 1,
-            correct,
-            wrong,
-            unanswered,
-            totalQuestions: total,
-            scoreRight,
-            scoreWrong,
-            scoreUnanswered,
-            maxScore: maxScoreScale,
-            pgScore: Math.round(pgScore * 100) / 100,
-            totalScore: Math.round(totalScore * 100) / 100,
-        });
-    }
-}
-
-const avgScore = results.length > 0 ? results.reduce((s, r) => s + r.totalScore, 0) / results.length : 0;
-const highest = results.length > 0 ? Math.max(...results.map(r => r.totalScore)) : 0;
-const lowest = results.length > 0 ? Math.min(...results.map(r => r.totalScore)) : 0;
-const finished = results.filter(r => r.status === 4).length;
-
-function scoreColor(score: number, max: number) {
-    const pct = max > 0 ? score / max : score / 100;
-    if (pct >= 0.8) return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-    if (pct >= 0.6) return 'bg-amber-100 text-amber-800 border-amber-200';
-    return 'bg-rose-100 text-rose-800 border-rose-200';
-}
 ---
 
-<AdminLayout title="Hasil & Rekap Nilai">
+<AdminLayout title="Hasil & Laporan">
     <!-- Header -->
     <div class="mb-6 flex flex-col sm:flex-row items-start justify-between gap-4">
         <div>
-            <h2 class="text-xl font-bold text-surface-800">Laporan Hasil Ujian & Nilai</h2>
-            <p class="text-sm text-surface-500 mt-1">Unduh, rekap, dan analisis perolehan skor siswa.</p>
+            <h2 class="text-xl font-bold text-surface-800">Laporan Hasil Ujian & Laporan</h2>
+            <p class="text-sm text-surface-500 mt-1">Pilih menu di bawah ini untuk mengelola hasil ujian dan esai.</p>
         </div>
     </div>
 
-    <!-- Filter bar -->
-    <div class="bg-white p-4 rounded-xl border border-surface-200 shadow-sm mb-6">
-        <form method="get" class="flex flex-wrap gap-4 items-end">
-            <div class="flex-1 min-w-[200px] max-w-sm">
-                <label class="block text-xs font-semibold text-surface-600 mb-1.5 uppercase tracking-wide">Pilih Ujian</label>
-                <select name="testId" class="w-full px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg text-sm text-surface-700 focus:ring-primary-500 focus:border-primary-500">
-                    <option value="">-- Pilih Ujian --</option>
-                    {allTests.map((t) => (
-                        <option value={t.id} selected={selectedTestId === t.id.toString()}>{t.name}</option>
-                    ))}
-                </select>
+    <!-- Navigation Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <!-- Rekap Nilai Card -->
+        <a
+            href="/admin/hasil/rekap"
+            class="group relative overflow-hidden flex items-start gap-4 p-5 bg-gradient-to-br from-white to-primary-50/50 rounded-2xl border border-primary-100 shadow-sm hover:border-primary-300 hover:shadow-md transition-all duration-300"
+        >
+            <div class="absolute top-0 right-0 w-32 h-32 bg-primary-100/40 rounded-full blur-3xl -mr-10 -mt-10 transition-all group-hover:bg-primary-200/40"></div>
+            
+            <div class="relative w-12 h-12 rounded-xl bg-primary-100 flex items-center justify-center shrink-0 group-hover:bg-primary-500 group-hover:scale-105 transition-all duration-300">
+                <i class="icon-bar-chart-2 w-6 h-6 text-primary-600 group-hover:text-white transition-colors"></i>
             </div>
-            <button type="submit" class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-semibold rounded-lg transition shadow-sm">
-                Tampilkan Hasil
-            </button>
-        </form>
+            <div class="relative min-w-0 z-10">
+                <p class="text-[15px] font-bold text-surface-800 group-hover:text-primary-700 transition-colors">Rekap Nilai Ujian</p>
+                <p class="text-xs text-surface-500 mt-1.5 leading-relaxed">Lihat rekapitulasi nilai seluruh peserta per-ujian, ekspor CSV, dan cetak laporan PDF.</p>
+            </div>
+            <i class="relative icon-chevron-right w-5 h-5 text-primary-300 group-hover:text-primary-500 group-hover:translate-x-1 mt-1 shrink-0 transition-all"></i>
+        </a>
+
+        <!-- Koreksi Esai Card -->
+        <a
+            href="/admin/hasil/koreksi-esai"
+            class="group relative overflow-hidden flex items-start gap-4 p-5 bg-gradient-to-br from-white to-amber-50/50 rounded-2xl border border-amber-100 shadow-sm hover:border-amber-300 hover:shadow-md transition-all duration-300"
+        >
+            <div class="absolute bottom-0 right-0 w-32 h-32 bg-amber-100/40 rounded-full blur-3xl -mr-10 -mb-10 transition-all group-hover:bg-amber-200/40"></div>
+
+            <div class="relative w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0 group-hover:bg-amber-500 group-hover:scale-105 transition-all duration-300">
+                <i class="icon-edit-3 w-6 h-6 text-amber-600 group-hover:text-white transition-colors"></i>
+            </div>
+            <div class="relative min-w-0 z-10">
+                <p class="text-[15px] font-bold text-surface-800 group-hover:text-amber-700 transition-colors">Koreksi &amp; Penilaian Esai</p>
+                <p class="text-xs text-surface-500 mt-1.5 leading-relaxed">Periksa manual jawaban esai siswa atau kelola penilaian otomatis (auto-grading).</p>
+            </div>
+            <i class="relative icon-chevron-right w-5 h-5 text-amber-300 group-hover:text-amber-500 group-hover:translate-x-1 mt-1 shrink-0 transition-all"></i>
+        </a>
     </div>
-
-    {selectedTest && results.length > 0 && (
-        <!-- Stats summary -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-            <div class="bg-white rounded-xl border border-surface-200 p-4 text-center">
-                <div class="text-2xl font-black text-surface-800">{results.length}</div>
-                <div class="text-xs text-surface-500 mt-0.5 font-medium">Total Peserta</div>
-            </div>
-            <div class="bg-white rounded-xl border border-surface-200 p-4 text-center">
-                <div class="text-2xl font-black text-emerald-600">{finished}</div>
-                <div class="text-xs text-surface-500 mt-0.5 font-medium">Selesai</div>
-            </div>
-            <div class="bg-white rounded-xl border border-surface-200 p-4 text-center">
-                <div class="text-2xl font-black text-primary-700">{Math.round(avgScore * 10) / 10}</div>
-                <div class="text-xs text-surface-500 mt-0.5 font-medium">Rata-rata</div>
-            </div>
-            <div class="bg-white rounded-xl border border-surface-200 p-4 text-center">
-                <div class="text-xs text-surface-400 font-medium">Tertinggi / Terendah</div>
-                <div class="text-sm font-black mt-0.5">
-                    <span class="text-emerald-600">{highest}</span>
-                    <span class="text-surface-300 mx-1">/</span>
-                    <span class="text-rose-500">{lowest}</span>
-                </div>
-            </div>
-        </div>
-    )}
-
-    {selectedTestId ? (
-        <div class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden">
-            <!-- Table header bar -->
-            <div class="px-5 py-3.5 border-b border-surface-200 bg-surface-50/50 flex flex-wrap gap-3 justify-between items-center">
-                <div>
-                    <h3 class="text-sm font-bold text-surface-700">
-                        Rekapitulasi Nilai — <span class="text-primary-600">{selectedTest?.name}</span>
-                    </h3>
-                    {results.length > 0 && (
-                        <p class="text-xs text-surface-400 mt-0.5">{results.length} peserta · {finished} selesai</p>
-                    )}
-                </div>
-                {results.length > 0 && (
-                    <div class="flex gap-2">
-                        <a
-                            href={`/admin/hasil/item-analysis?testId=${selectedTestId}`}
-                            class="px-3 py-1.5 bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-semibold rounded-lg transition shadow-sm border border-primary-200 flex items-center gap-1.5"
-                        >
-                            <i class="icon-pie-chart w-3.5 h-3.5"></i> Analisis Butir Soal
-                        </a>
-                        <a
-                            href={`/admin/hasil/cetak?testId=${selectedTestId}`}
-                            target="_blank"
-                            class="px-3 py-1.5 bg-surface-100 hover:bg-surface-200 text-surface-700 text-xs font-semibold rounded-lg transition shadow-sm border border-surface-200 flex items-center gap-1.5"
-                        >
-                            <i class="icon-printer w-3.5 h-3.5"></i> Cetak PDF
-                        </a>
-                        <a
-                            href={`/api/ujian/export?testId=${selectedTestId}`}
-                            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow-sm flex items-center gap-1.5"
-                        >
-                            <i class="icon-download w-3.5 h-3.5"></i> Ekspor CSV
-                        </a>
-                    </div>
-                )}
-            </div>
-
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm text-surface-600">
-                    <thead class="bg-surface-50 border-b border-surface-200 text-surface-700 font-semibold text-xs uppercase tracking-wide">
-                        <tr>
-                            <th class="px-4 py-3 w-10 text-center">No</th>
-                            <th class="px-4 py-3">Nama / Kelas</th>
-                            <th class="px-4 py-3 text-center">Status</th>
-                            <th class="px-4 py-3 text-center text-emerald-700">✓ Benar</th>
-                            <th class="px-4 py-3 text-center text-rose-600">✗ Salah</th>
-                            <th class="px-4 py-3 text-center">Skor PG</th>
-                            <th class="px-4 py-3 text-center">Nilai</th>
-                            <th class="px-4 py-3 w-10 text-center">Analisis</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-surface-100">
-                        {results.length === 0 ? (
-                            <tr>
-                                <td colspan="8" class="px-5 py-12 text-center text-surface-400">
-                                    <i class="icon-users w-10 h-10 mx-auto mb-3 block opacity-30"></i>
-                                    Belum ada peserta yang mengerjakan ujian ini.
-                                </td>
-                            </tr>
-                        ) : results.map((r, idx) => (
-                            <tr class="hover:bg-surface-50/60 transition-colors group">
-                                <td class="px-4 py-3.5 text-center text-surface-400 text-xs font-mono">{idx + 1}</td>
-                                <td class="px-4 py-3.5">
-                                    <div class="font-bold text-surface-800 group-hover:text-primary-700 transition-colors">{r.firstName}</div>
-                                    <div class="flex items-center gap-2 mt-0.5">
-                                        <span class="text-[10px] text-surface-400 font-mono">{r.username}</span>
-                                        {r.groupName && <span class="text-[10px] text-surface-400">· {r.groupName}</span>}
-                                    </div>
-                                </td>
-                                <td class="px-4 py-3.5 text-center">
-                                    {r.status === 4 ? (
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold uppercase">
-                                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>Selesai
-                                        </span>
-                                    ) : r.status === 5 ? (
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-surface-100 text-surface-600 border border-surface-200 rounded-full text-[10px] font-bold uppercase" title="Nilai dari pengerjaan sebelumnya yang telah diarsip">
-                                            <span class="w-1.5 h-1.5 rounded-full bg-surface-400 inline-block"></span>Arsip
-                                        </span>
-                                    ) : (
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-bold uppercase">
-                                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block"></span>Berlangsung
-                                        </span>
-                                    )}
-                                </td>
-                                <td class="px-4 py-3.5 text-center">
-                                    <span class="text-lg font-black text-emerald-600">{r.correct}</span>
-                                    <div class="text-[10px] text-surface-400">{r.totalQuestions > 0 ? Math.round(r.correct / r.totalQuestions * 100) : 0}%</div>
-                                </td>
-                                <td class="px-4 py-3.5 text-center">
-                                    <span class="text-lg font-black text-rose-500">{r.wrong}</span>
-                                </td>
-                                <td class="px-4 py-3.5 text-center font-mono font-semibold text-surface-700">
-                                    {r.pgScore}
-                                </td>
-                                <td class="px-4 py-3.5 text-center">
-                                    <span class={`px-3 py-1 rounded-full border text-xs font-black ${scoreColor(r.totalScore, r.maxScore > 0 ? r.maxScore : r.totalQuestions * r.scoreRight)}`}>
-                                        {r.totalScore}
-                                    </span>
-                                </td>
-                                <td class="px-4 py-3.5 text-center">
-                                    <a
-                                        href={`/admin/hasil/detail?sessionId=${r.sessionId}`}
-                                        title="Analisis Butir Soal"
-                                        class="w-8 h-8 rounded-lg border border-surface-200 text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition inline-flex items-center justify-center"
-                                    >
-                                        <i class="icon-pie-chart w-4 h-4"></i>
-                                    </a>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-
-            {/* Scoring legend */}
-            {testConfig && (
-                <div class="px-5 py-3 bg-surface-50 border-t border-surface-100 flex flex-wrap gap-4 text-xs text-surface-500">
-                    <span>Benar: <strong class="text-emerald-600">+{testConfig.scoreRight}</strong></span>
-                    <span>Salah: <strong class="text-rose-500">{testConfig.scoreWrong}</strong></span>
-                    {testConfig.maxScore > 0 && <span>Maks: <strong class="text-primary-600">{testConfig.maxScore}</strong></span>}
-                </div>
-            )}
-        </div>
-    ) : (
-        <div class="bg-surface-50 border border-surface-200 border-dashed rounded-2xl p-14 text-center text-surface-500">
-            <i class="icon-bar-chart-2 w-12 h-12 mx-auto mb-4 block text-surface-300"></i>
-            <p class="font-semibold text-surface-600">Pilih ujian untuk melihat rekap nilai</p>
-            <p class="text-sm mt-1">Data benar, salah, dan skor total dihitung langsung dari jawaban peserta.</p>
-        </div>
-    )}
 </AdminLayout>

@@ -100,10 +100,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
             let query = db.select({ id: questions.id, type: questions.type })
                 .from(questions)
                 .where(
-                    and(
-                        eq(questions.topicId, bp.topicId),
-                        eq(questions.type, bp.questionType)
-                    )
+                    bp.questionType === 7
+                        ? eq(questions.topicId, bp.topicId)
+                        : and(
+                            eq(questions.topicId, bp.topicId),
+                            eq(questions.type, bp.questionType)
+                        )
                 );
 
             if (bp.shuffleQuestions) {
@@ -129,7 +131,55 @@ export const POST: APIRoute = async ({ request, locals }) => {
         }
 
         // We can do an outer shuffle of the final package so topics are mixed (optional, based on future logic, right now we'll shuffle all)
-        finalQuestionIds = finalQuestionIds.sort(() => Math.random() - 0.5);
+        if (testData?.mode === 'tka') {
+            // TKA Specific Sorting Logic
+            let allPg = finalQuestionIds.filter(q => q.type === 1);
+            let others = finalQuestionIds.filter(q => q.type !== 1);
+            
+            // Randomize PG first so we can pick 3
+            allPg = allPg.sort(() => Math.random() - 0.5);
+            
+            const firstThreePg = allPg.splice(0, 3);
+            const remainingPgBlocks = allPg.map(q => [q]); // wrap each remaining PG in an array to act as a block of size 1
+            
+            // Group others by type into blocks
+            const typeIds = [...new Set(others.map(q => q.type))];
+            let otherBlocks: (typeof finalQuestionIds)[] = [];
+            
+            for (const t of typeIds) {
+                let group = others.filter(q => q.type === t);
+                group = group.sort(() => Math.random() - 0.5); // shuffle within the block
+                otherBlocks.push(group);
+            }
+            
+            // Shuffle the non-PG blocks among themselves natively
+            otherBlocks = otherBlocks.sort(() => Math.random() - 0.5);
+            
+            // Sprinkle remaining PGs
+            if (otherBlocks.length > 0) {
+                // Ensure the first element of mixed blocks is ALWAYS a non-PG block (so question 4 is never PG)
+                for (const pgBlock of remainingPgBlocks) {
+                    // Random insertion slot from 1 to current max length (inclusive)
+                    // This protects index 0, so the first block remains non-PG
+                    const slotIndex = Math.floor(Math.random() * otherBlocks.length) + 1;
+                    otherBlocks.splice(slotIndex, 0, pgBlock);
+                }
+            } else {
+                // If there are no non-PG blocks at all in the exam, just append the remaining PGs
+                otherBlocks = remainingPgBlocks;
+            }
+            
+            // Flatten the mixed blocks
+            let groupedOthers: typeof finalQuestionIds = [];
+            for (const block of otherBlocks) {
+                groupedOthers.push(...block);
+            }
+            
+            finalQuestionIds = [...firstThreePg, ...groupedOthers];
+        } else {
+            // Standard Global Shuffle
+            finalQuestionIds = finalQuestionIds.sort(() => Math.random() - 0.5);
+        }
 
         // 6. DB COMMIT: Create the User Session
         // Since Drizzle with SQLite doesn't natively do robust transactions across multiple inserts easily if we fetch insertIds, 
@@ -153,23 +203,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
         const insertedQuestions = await db.insert(testQuestions).values(questionsToInsert).returning();
 
-        // 8. Fetch and Insert Answers in BULK (for Multiple Choice)
-        const pgQuestionIds = finalQuestionIds.filter(q => q.type === 1).map(q => q.id);
+        // 8. Fetch and Insert Answers in BULK (for Multiple Choice, Matching, Ceklis, and Benar/Salah)
+        const relevantQuestionIds = finalQuestionIds.filter(q => q.type === 1 || q.type === 4 || q.type === 5 || q.type === 6).map(q => q.id);
         
-        if (pgQuestionIds.length > 0) {
+        if (relevantQuestionIds.length > 0) {
             const allAnswers = await db.select({
                 id: questionAnswers.id,
                 questionId: questionAnswers.questionId
             })
             .from(questionAnswers)
-            .where(inArray(questionAnswers.questionId, pgQuestionIds))
+            .where(inArray(questionAnswers.questionId, relevantQuestionIds))
             .all();
 
             const answersToInsert: any[] = [];
             
             for (const tq of insertedQuestions) {
                 const qBlueprint = finalQuestionIds.find(f => f.id === tq.questionId);
-                if (qBlueprint?.type === 1) {
+                if (qBlueprint?.type === 1 || qBlueprint?.type === 4 || qBlueprint?.type === 5 || qBlueprint?.type === 6) {
                     let qAnswers = allAnswers.filter(a => a.questionId === tq.questionId);
                     
                     if (qBlueprint.shuffleOptions) {

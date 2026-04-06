@@ -53,6 +53,13 @@ const allQuestions = await db
         </div>
         <div class="flex gap-2">
             <a
+                href={`/admin/soal/preview/${topic.id}`}
+                target="_blank"
+                class="px-4 py-2 bg-white border border-amber-500 text-amber-600 hover:text-amber-700 text-sm font-bold rounded-lg hover:bg-amber-50 transition shadow-sm"
+            >
+                <i class="icon-eye w-4 h-4 inline-block mr-1"></i> Lihat Preview Ujian
+            </a>
+            <a
                 href={`/admin/soal/import?topicId=${topic.id}`}
                 class="px-4 py-2 bg-white border border-surface-200 text-surface-700 text-sm font-medium rounded-lg hover:bg-surface-50 transition shadow-sm"
             >
@@ -71,6 +78,9 @@ const allQuestions = await db
     <div class="bg-white p-4 rounded-xl border border-surface-200 shadow-sm mb-6 flex flex-wrap gap-4 items-center justify-between">
         <h3 class="font-semibold text-surface-800">Daftar Bank Soal</h3>
         <div class="flex items-center gap-3">
+            <button id="btn-bulk-delete" class="hidden px-3 py-2 bg-danger-50 border border-danger-200 text-danger-700 text-sm font-bold rounded-lg hover:bg-danger-100 transition shadow-sm items-center gap-2" onclick="deleteSelected()">
+                <i class="icon-trash-2 w-4 h-4"></i> Hapus <span id="selected-count">0</span> Terpilih
+            </button>
             <div class="text-sm border border-surface-200 bg-surface-50 rounded-lg px-3 py-2 text-surface-600 font-medium">
                 Total: <span class="text-primary-600 font-bold">{allQuestions.length}</span> Soal
             </div>
@@ -82,6 +92,9 @@ const allQuestions = await db
         <table class="w-full text-left text-sm text-surface-600">
             <thead class="bg-surface-50 border-b border-surface-200 text-surface-700 font-semibold">
                 <tr>
+                    <th class="px-5 py-4 w-12 text-center">
+                        <input type="checkbox" id="selectAll" class="w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500 cursor-pointer" onchange="toggleAll(this)">
+                    </th>
                     <th class="px-5 py-4 w-16 text-center">Nomor</th>
                     <th class="px-5 py-4">Pertanyaan</th>
                     <th class="px-5 py-4 w-48 hidden sm:table-cell">Mata Pelajaran</th>
@@ -92,7 +105,7 @@ const allQuestions = await db
             <tbody class="divide-y divide-surface-100">
                 {allQuestions.length === 0 ? (
                     <tr>
-                        <td colspan="5" class="px-5 py-12 text-center text-surface-500">
+                        <td colspan="6" class="px-5 py-12 text-center text-surface-500">
                             <div class="w-16 h-16 bg-surface-100 rounded-full flex items-center justify-center mx-auto mb-3 text-surface-400">
                                 <i class="icon-inbox w-8 h-8"></i>
                             </div>
@@ -103,6 +116,9 @@ const allQuestions = await db
                 ) : (
                     allQuestions.map((soal, idx) => (
                         <tr class="hover:bg-surface-50/50 transition-colors">
+                            <td class="px-5 py-4 text-center">
+                                <input type="checkbox" name="selectedQuestion" value={soal.id} class="w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500 cursor-pointer cb-question" onchange="updateSelection()">
+                            </td>
                             <td class="px-5 py-4 text-center text-surface-400 font-medium">{idx + 1}</td>
                             <td class="px-5 py-4">
                                 <div class="font-medium text-surface-800 line-clamp-3 prose prose-sm max-w-none prose-p:my-0 prose-img:max-h-12 prose-img:inline" set:html={soal.text}></div>
@@ -120,18 +136,24 @@ const allQuestions = await db
                                     <span class="px-2.5 py-1 bg-primary-50 border border-primary-100 text-primary-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Ganda</span>
                                 ) : soal.type === 2 ? (
                                     <span class="px-2.5 py-1 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Esai</span>
+                                ) : soal.type === 4 ? (
+                                    <span class="px-2.5 py-1 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Jodoh</span>
+                                ) : soal.type === 5 ? (
+                                    <span class="px-2.5 py-1 bg-cyan-50 border border-cyan-100 text-cyan-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Ceklis</span>
+                                ) : soal.type === 6 ? (
+                                    <span class="px-2.5 py-1 bg-purple-50 border border-purple-100 text-purple-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">B / S</span>
                                 ) : (
                                     <span class="px-2.5 py-1 bg-amber-50 border border-amber-100 text-amber-700 rounded-lg text-[10px] font-bold tracking-wider uppercase">Singkat</span>
                                 )}
                             </td>
                             <td class="px-5 py-4 text-center">
                                 <div class="flex items-center justify-center gap-1.5">
-                                    {soal.type === 1 && (
+                                    {(soal.type === 1 || soal.type === 5 || soal.type === 6) && (
                                         <a href={`/admin/soal/jawaban/${soal.id}`} title="Kelola Kunci Jawaban" class="w-8 h-8 rounded-lg text-emerald-600 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/50 transition flex items-center justify-center">
                                             <i class="icon-check-square w-4 h-4"></i>
                                         </a>
                                     )}
-                                    {soal.type !== 1 && (
+                                    {!(soal.type === 1 || soal.type === 5 || soal.type === 6) && (
                                         <div class="w-8 h-8"></div> <!-- placeholder to keep alignment -->
                                     )}
                                     <div class="w-px h-4 bg-surface-200 mx-0.5"></div>
@@ -152,6 +174,63 @@ const allQuestions = await db
 </AdminLayout>
 
 <script>
+    (window as any).toggleAll = (source: HTMLInputElement) => {
+        const checkboxes = document.querySelectorAll('.cb-question') as NodeListOf<HTMLInputElement>;
+        checkboxes.forEach(cb => cb.checked = source.checked);
+        updateSelection();
+    };
+
+    function updateSelection() {
+        const checkboxes = document.querySelectorAll('.cb-question:checked') as NodeListOf<HTMLInputElement>;
+        const btnBulk = document.getElementById('btn-bulk-delete');
+        const spanCount = document.getElementById('selected-count');
+        const selectAll = document.getElementById('selectAll') as HTMLInputElement;
+        const totalCb = document.querySelectorAll('.cb-question').length;
+
+        if (spanCount) spanCount.textContent = checkboxes.length.toString();
+        
+        if (checkboxes.length > 0) {
+            btnBulk?.classList.remove('hidden');
+            btnBulk?.classList.add('flex');
+        } else {
+            btnBulk?.classList.add('hidden');
+            btnBulk?.classList.remove('flex');
+        }
+
+        if (selectAll && totalCb > 0) {
+            selectAll.checked = checkboxes.length === totalCb;
+            selectAll.indeterminate = checkboxes.length > 0 && checkboxes.length < totalCb;
+        }
+    }
+
+    (window as any).updateSelection = updateSelection;
+
+    (window as any).deleteSelected = async () => {
+        const checkboxes = document.querySelectorAll('.cb-question:checked') as NodeListOf<HTMLInputElement>;
+        if (checkboxes.length === 0) return;
+        
+        const ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
+        
+        if (!confirm(`Apakah Anda yakin ingin menghapus ${ids.length} soal terpilih?\n(Tindakan ini tidak dapat dibatalkan)`)) return;
+
+        try {
+            const res = await fetch("/api/soal/pertanyaan", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: ids }),
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert("Gagal menghapus: " + data.error);
+                return;
+            }
+            window.location.reload();
+        } catch (e) {
+            alert("Terjadi kesalahan jaringan.");
+        }
+    };
+
     (window as any).deleteQuestion = async (id: number) => {
         if (!confirm("Apakah Anda yakin ingin menghapus soal ini beserta pilihan jawabannya?\n(Tindakan ini tidak dapat dibatalkan)")) return;
 

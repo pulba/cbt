@@ -15,10 +15,15 @@ const currentPath = Astro.url.pathname;
 const isUjianCBT = currentPath.includes("/siswa/kerjakan");
 
 // Fetch system configs
-const allConfigs = await db.select().from(configs).all();
-const getConfig = (key: string) => allConfigs.find(c => c.key === key)?.value || "";
+import { sql } from 'drizzle-orm';
+const allConfigs = await db.select({ 
+    key: configs.key, 
+    value: sql<string>`CASE WHEN ${configs.key} = 'school_logo' THEN '1' ELSE ${configs.value} END` 
+}).from(configs).all();
+const getConfig = (key: string) => allConfigs.find((c: any) => c.key === key)?.value || "";
 const cbtNama = getConfig("cbt_nama") || "Computer Based Test";
 const schoolName = getConfig("school_name") || "CBT App";
+const hasLogo = !!getConfig("school_logo");
 ---
 
 <!doctype html>
@@ -26,11 +31,30 @@ const schoolName = getConfig("school_name") || "CBT App";
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Amiri:wght@400;700&display=swap"
             rel="stylesheet"
         />
+        <link rel="icon" href={hasLogo ? "/api/public/logo" : "/favicon.svg"} />
         <title>{title} | {cbtNama}</title>
+        
+        <!-- MathJax Configuration for OMML/LaTeX rendering -->
+        <script is:inline>
+            window.MathJax = {
+                tex: {
+                    inlineMath: [['\\(', '\\)'], ['$', '$']],
+                    displayMath: [['\\[', '\\]'], ['$$', '$$']],
+                    processEscapes: true
+                },
+                options: {
+                    ignoreHtmlClass: 'tex2jax_ignore',
+                    processHtmlClass: 'tex2jax_process'
+                }
+            };
+        </script>
+        <script is:inline id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     </head>
     <body class="h-full text-surface-800 flex flex-col font-sans">
         {
@@ -38,9 +62,11 @@ const schoolName = getConfig("school_name") || "CBT App";
                 <header class="bg-primary-700 text-white shadow-md sticky top-0 z-40">
                     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                         <div class="flex items-center gap-3">
-                            <div class="w-8 h-8 rounded bg-white/20 flex items-center justify-center font-bold">
-                                SAS
-                            </div>
+                            <img 
+                                src={hasLogo ? "/api/public/logo" : "/favicon.svg"} 
+                                alt="Logo" 
+                                class="w-8 h-8 rounded object-contain bg-white/20 p-1" 
+                            />
                             <span class="font-semibold tracking-wide hidden sm:block">
                                 {cbtNama}
                             </span>

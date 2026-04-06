@@ -1,0 +1,817 @@
+﻿---
+import StudentLayout from "../../../layouts/StudentLayout.astro";
+import { db } from "../../../db";
+import {
+    tests,
+    testTopicSets,
+    testUsers,
+    testQuestions,
+    questions,
+    testQuestionAnswers,
+    questionAnswers,
+    users,
+    userGroups,
+    configs,
+} from "../../../db/schema";
+import { eq, and, sum, max, inArray } from "drizzle-orm";
+
+const { id } = Astro.params;
+const user = Astro.locals.user;
+
+if (!id || !user || user.role !== "student") {
+    return Astro.redirect("/siswa/ujian");
+}
+
+const testId = parseInt(id);
+
+const testData = await db.select().from(tests).where(eq(tests.id, testId)).get();
+if (!testData) return Astro.redirect("/siswa/ujian");
+
+// Fetch browser lock config
+const lockConfig = await db.select().from(configs).where(eq(configs.key, "cbt_mobile_lock_xambro")).get();
+const isLocked = lockConfig?.value === "true";
+const userAgent = Astro.request.headers.get("user-agent") || "";
+const isXambro = userAgent.includes("Xambro") || userAgent.includes("Exambrowser");
+
+if (isLocked && !isXambro) {
+    return Astro.redirect("/siswa/ujian?error=browser_lock");
+}
+
+const session = await db
+    .select()
+    .from(testUsers)
+    .where(and(eq(testUsers.testId, testId), eq(testUsers.userId, user.id)))
+    .get();
+
+if (!session) return Astro.redirect("/siswa/ujian");
+if (session.status === 4) return Astro.redirect("/siswa/ujian?msg=finished");
+if (session.status === 10) return Astro.redirect("/siswa/ujian?error=violation_lock");
+
+// Fetch user profile
+const userProfile = await db
+    .select({ firstName: users.firstName, username: users.username, groupName: userGroups.name })
+    .from(users)
+    .leftJoin(userGroups, eq(users.groupId, userGroups.id))
+    .where(eq(users.id, user.id))
+    .get();
+
+// Fetch randomized questions
+const sessionQuestions = await db
+    .select({
+        tqId: testQuestions.id,
+        orderIdx: testQuestions.orderIdx,
+        isDoubtful: testQuestions.isDoubtful,
+        qId: questions.id,
+        qType: questions.type,
+        qText: questions.text,
+        qAudioPath: questions.audio,
+        answerText: testQuestions.answerText,
+    })
+    .from(testQuestions)
+    .innerJoin(questions, eq(testQuestions.questionId, questions.id))
+    .where(eq(testQuestions.testUserId, session.id))
+    .orderBy(testQuestions.orderIdx)
+    .all();
+
+// Fetch randomized answers using inArray for efficiency
+const sessionQuestionIds = sessionQuestions.map((q) => q.tqId);
+let sessionAnswers: any[] = [];
+
+if (sessionQuestionIds.length > 0) {
+    sessionAnswers = await db
+        .select({
+            id: testQuestionAnswers.id,
+            tqId: testQuestionAnswers.testQuestionId,
+            isSelected: testQuestionAnswers.isSelected,
+            orderIdx: testQuestionAnswers.orderIdx,
+            ansId: questionAnswers.id,
+            ansText: questionAnswers.text,
+        })
+        .from(testQuestionAnswers)
+        .innerJoin(questionAnswers, eq(testQuestionAnswers.answerId, questionAnswers.id))
+        .where(inArray(testQuestionAnswers.testQuestionId, sessionQuestionIds))
+        .orderBy(testQuestionAnswers.orderIdx)
+        .all();
+}
+
+// ΓÜá∩╕Å AUTO-RESET: Detect corrupt session (no answers for PG questions)
+// This happens when session was generated before testQuestionAnswers import fix
+const pgQuestions = sessionQuestions.filter(q => q.qType === 1);
+const hasAnyAnswers = sessionAnswers.length > 0;
+if (pgQuestions.length > 0 && !hasAnyAnswers) {
+    // Delete corrupt session data (cascade)
+    const tqIds = sessionQuestions.map(q => q.tqId);
+    for (const tqId of tqIds) {
+        await db.delete(testQuestionAnswers).where(eq(testQuestionAnswers.testQuestionId, tqId));
+    }
+    await db.delete(testQuestions).where(eq(testQuestions.testUserId, session.id));
+    await db.delete(testUsers).where(eq(testUsers.id, session.id));
+    // Redirect to confirmation to regenerate fresh
+    return Astro.redirect(`/siswa/konfirmasi/${testId}?autoReset=1`);
+}
+
+// Fetch timing
+const timingData = await db
+    .select({
+        durationMinutes: sum(testTopicSets.durationMinutes),
+    })
+    .from(testTopicSets)
+    .where(eq(testTopicSets.testId, testId))
+    .get();
+
+const spaState = JSON.stringify({
+    session: { id: session.id, status: session.status },
+    test: {
+        id: testData.id,
+        name: testData.name,
+        durationMinutes: Number(timingData?.durationMinutes ?? 60),
+    },
+    questions: sessionQuestions.map((q) => ({
+        ...q,
+        answers: sessionAnswers
+            .filter((a) => a.tqId === q.tqId)
+            .sort((a, b) => a.orderIdx - b.orderIdx),
+    })),
+});
+
+const totalQuestions = sessionQuestions.length;
+const studentName = userProfile?.firstName || user.username;
+---
+
+<StudentLayout title={`Ujian - ${testData.name}`}>
+    <script id="exam-data" type="application/json" set:html={spaState} />
+
+    <!-- Full Screen Exam UI -->
+    <div class="fixed inset-0 bg-slate-100 z-50 flex flex-col overflow-hidden" id="exam-root">
+
+        <!-- ΓòÉΓòÉΓòÉ HEADER ΓòÉΓòÉΓòÉ -->
+        <header class="bg-white border-b border-slate-200 shadow-sm shrink-0 z-20">
+            <div class="flex items-center justify-between px-3 sm:px-5 h-14 gap-2">
+                <!-- Left: Logo + test name -->
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <div class="flex items-center shrink-0">
+                        <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary-600 flex items-center justify-center mr-1.5">
+                            <i class="icon-book-open w-4 h-4 text-white"></i>
+                        </div>
+                        <span class="font-black text-slate-800 text-sm hidden xs:block">SAS<span class="font-light text-slate-400 ml-0.5">CBT</span></span>
+                    </div>
+                    <div class="w-px h-5 bg-slate-200 shrink-0 hidden sm:block"></div>
+                    <span class="text-xs sm:text-sm font-semibold text-slate-600 truncate hidden sm:block max-w-[160px] md:max-w-xs">{testData.name}</span>
+                </div>
+
+                <!-- Center: Question counter + Sync status -->
+                <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                        <span class="text-[10px] text-slate-400 hidden sm:block font-medium">Soal</span>
+                        <span class="text-sm font-black text-slate-800 font-mono"><span id="header-q-num">1</span><span class="text-slate-300 font-light">/{totalQuestions}</span></span>
+                    </div>
+                    <div id="sync-status" class="flex items-center gap-1 px-2 text-[10px] font-black uppercase tracking-widest text-emerald-500 transition-opacity duration-300 opacity-0">
+                        <i class="icon-refresh-cw w-3 h-3 animate-spin"></i>
+                        <span>Saving</span>
+                    </div>
+                </div>
+
+                <!-- Right: Timer + Nav toggle (mobile) + Finish -->
+                <div class="flex items-center gap-2 shrink-0">
+                    <!-- Timer -->
+                    <div class="flex items-center gap-1.5 bg-slate-800 text-white rounded-lg px-2.5 sm:px-3 py-1.5">
+                        <i class="icon-clock w-3.5 h-3.5 text-amber-300 shrink-0"></i>
+                        <span id="countdown-timer" class="text-sm font-mono font-bold text-amber-300 tracking-widest">00:00:00</span>
+                    </div>
+
+                    <!-- Nav toggle (mobile only) -->
+                    <button
+                        id="nav-toggle-btn"
+                        onclick="toggleNavPanel()"
+                        class="sm:hidden w-9 h-9 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center relative"
+                        title="Navigasi Soal"
+                    >
+                        <i class="icon-layout-grid w-4 h-4 text-slate-600"></i>
+                        <span id="nav-badge" class="absolute -top-1 -right-1 w-4 h-4 bg-primary-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center hidden">0</span>
+                    </button>
+
+                    <!-- Finish -->
+                    <button
+                        onclick="finishTest()"
+                        class="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg transition shadow-sm"
+                    >
+                        <i class="icon-check-circle w-3.5 h-3.5"></i>
+                        <span class="hidden xs:inline">Selesai</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="h-1 bg-slate-100">
+                <div id="progress-bar" class="h-full bg-gradient-to-r from-primary-500 to-indigo-500 transition-all duration-500" style="width: 0%"></div>
+            </div>
+        </header>
+
+        <!-- ΓòÉΓòÉΓòÉ BODY ΓòÉΓòÉΓòÉ -->
+        <div class="flex-1 flex overflow-hidden relative">
+
+            <!-- ΓöÇΓöÇΓöÇ QUESTION PANEL ΓöÇΓöÇΓöÇ -->
+            <div class="flex-1 overflow-y-auto" id="question-panel-scroll">
+                <div class="max-w-3xl mx-auto px-3 sm:px-6 lg:px-8 py-5 pb-24 sm:pb-8">
+
+                    <!-- Question header -->
+                    <div class="flex items-center justify-between mb-5 gap-3">
+                        <div class="flex items-center gap-3">
+                            <div id="q-badge"
+                                class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-primary-600 text-white flex items-center justify-center text-base sm:text-lg font-black font-mono shadow-md shadow-primary-600/25 shrink-0">
+                                1
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Soal Nomor</div>
+                                <div class="text-lg font-black text-slate-800 leading-tight font-mono">
+                                    <span id="q-num">1</span><span class="text-slate-300 text-sm font-light"> / {totalQuestions}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Flag button -->
+                        <button
+                            id="flag-btn"
+                            onclick="toggleFlag()"
+                            class="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300 text-xs sm:text-sm font-bold transition whitespace-nowrap"
+                        >
+                            <i id="flag-icon" class="icon-flag w-3.5 h-3.5"></i>
+                            <span>Ragu-ragu</span>
+                        </button>
+                    </div>
+
+                    <!-- Question text card -->
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7 mb-5">
+                        <div id="question-content" class="prose prose-sm sm:prose-base max-w-none text-slate-800 leading-relaxed">
+                            <!-- Rendered by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Answer options -->
+                    <div class="space-y-2.5 sm:space-y-3" id="options-container">
+                        <!-- Rendered by JS -->
+                    </div>
+
+                    <!-- Mobile bottom nav -->
+                    <div class="flex gap-3 mt-6 sm:hidden">
+                        <button id="btn-prev-m" onclick="navigateItem(-1)"
+                            class="w-28 py-3 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-600 text-sm transition hover:bg-slate-50 flex justify-center items-center gap-1.5">
+                            <i class="icon-chevron-left w-4 h-4"></i> Prev
+                        </button>
+                        <button id="btn-next-m" onclick="smartNext()"
+                            class="flex-1 py-3 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm transition shadow-md flex justify-center items-center gap-1.5">
+                            Next <i class="icon-chevron-right w-4 h-4" id="icon-next-m"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ΓöÇΓöÇΓöÇ NAV PANEL (sidebar desktop / drawer mobile) ΓöÇΓöÇΓöÇ -->
+            <!-- Mobile overlay -->
+            <div id="nav-overlay" class="fixed inset-0 bg-slate-900/50 z-30 hidden sm:hidden" onclick="toggleNavPanel()"></div>
+
+            <!-- Nav panel itself -->
+            <aside id="nav-panel"
+                class="
+                    fixed bottom-0 left-0 right-0 z-40 max-h-[70vh]
+                    sm:static sm:max-h-none sm:z-auto
+                    bg-white border-t sm:border-t-0 sm:border-l border-slate-200
+                    sm:w-64 md:w-72 lg:w-80 shrink-0
+                    flex flex-col
+                    shadow-[0_-4px_24px_rgba(0,0,0,0.08)] sm:shadow-[-4px_0_12px_-2px_rgba(0,0,0,0.04)]
+                    rounded-t-2xl sm:rounded-none
+                    translate-y-full sm:translate-y-0
+                    transition-transform duration-300
+                ">
+
+                <!-- Panel header -->
+                <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
+                    <!-- Mobile drag handle -->
+                    <div class="sm:hidden absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 bg-slate-300 rounded-full"></div>
+
+                    <div class="flex items-center gap-2 text-sm font-bold text-slate-700">
+                        <i class="icon-layout-grid w-4 h-4 text-primary-500"></i>
+                        Navigasi Soal
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[10px] text-slate-400 leading-none">Terjawab</div>
+                        <div class="text-sm font-black text-slate-800 leading-tight">
+                            <span id="answered-count">0</span><span class="text-slate-300 font-light text-xs">/{totalQuestions}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mini progress -->
+                <div class="px-4 py-2 bg-slate-50 border-b border-slate-100 shrink-0">
+                    <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        <div id="side-progress" class="h-full bg-gradient-to-r from-primary-500 to-indigo-500 rounded-full transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Legend -->
+                <div class="px-4 py-2 border-b border-slate-100 shrink-0">
+                    <div class="flex items-center justify-center gap-4 text-[10px] font-semibold text-slate-500">
+                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-slate-200 inline-block"></span>Kosong</span>
+                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-primary-600 inline-block"></span>Dijawab</span>
+                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-amber-400 inline-block"></span>Ragu</span>
+                    </div>
+                </div>
+
+                <!-- Question grid -->
+                <div class="p-3 overflow-y-auto flex-1" style="scrollbar-width: thin; scrollbar-color: #e2e8f0 transparent;">
+                    <div class="grid grid-cols-6 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 gap-1.5" id="nav-grid">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+
+                <!-- Desktop nav buttons -->
+                <div class="p-3 border-t border-slate-100 hidden sm:flex gap-2 shrink-0">
+                    <button id="btn-prev" onclick="navigateItem(-1)"
+                        class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-slate-600 text-sm transition flex justify-center items-center gap-1">
+                        <i class="icon-chevron-left w-4 h-4"></i> Prev
+                    </button>
+                    <button id="btn-next" onclick="smartNext()"
+                        class="flex-1 py-2.5 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm transition shadow-md flex justify-center items-center gap-1">
+                        Next <i class="icon-chevron-right w-4 h-4" id="icon-next"></i>
+                    </button>
+                </div>
+            </aside>
+        </div>
+    </div>
+</StudentLayout>
+
+<style>
+/* Option hover - smooth left bar expansion */
+.opt-label { transition: all 0.12s ease; }
+.opt-label:active { transform: scale(0.995); }
+
+/* Timer warning pulse */
+#countdown-timer.warning { animation: timer-pulse 1s ease-in-out infinite; }
+@keyframes timer-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* Nav grid scrollbar */
+#nav-panel ::-webkit-scrollbar { width: 3px; }
+#nav-panel ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 4px; }
+</style>
+
+<script>
+// ΓöÇΓöÇΓöÇ TYPES ΓöÇΓöÇΓöÇ
+interface Answer { id: number; tqId: number; isSelected: boolean; orderIdx: number; ansId: number; ansText: string; }
+interface Question { tqId: number; orderIdx: number; isDoubtful: boolean; qId: number; qType: number; qText: string; qAudioPath: string | null; answerText: string | null; answers: Answer[]; }
+interface State { session: { id: number; status: number }; test: { id: number; name: string; durationMinutes: number }; questions: Question[]; }
+
+// ΓöÇΓöÇΓöÇ STATE ΓöÇΓöÇΓöÇ
+let state: State = { session: null as any, test: null as any, questions: [] };
+let cur = 0;
+let isSystemAction = false; // Flag to ignore blur during alerts/confirms
+
+// ΓöÇΓöÇΓöÇ INIT ΓöÇΓöÇΓöÇ
+document.addEventListener("DOMContentLoaded", () => {
+    const raw = document.getElementById("exam-data")?.innerHTML;
+    if (!raw) { alert("Gagal memuat data ujian."); return; }
+    state = JSON.parse(raw);
+    render();
+    renderGrid();
+    updateProgress();
+    startTimer();
+    initAntiCheat();
+});
+
+// ΓöÇΓöÇΓöÇ ANTI-CHEAT ΓöÇΓöÇΓöÇ
+function initAntiCheat() {
+    let focusLost = false;
+    
+    window.addEventListener("blur", () => {
+        if (focusLost || isSystemAction) return;
+        focusLost = true;
+        handleViolation();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") {
+            if (focusLost || isSystemAction) return;
+            focusLost = true;
+            handleViolation();
+        }
+    });
+
+    window.addEventListener("focus", () => {
+        focusLost = false;
+    });
+}
+
+async function handleViolation() {
+    try {
+        const res = await fetch("/api/peserta/violation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ testId: state.test.id })
+        });
+        
+        const data = await res.json();
+        
+        if (data.isLocked) {
+            alert("ΓÜá∩╕Å UJIAN TERKUNCI!\n\nAnda telah terdeteksi meninggalkan halaman ujian sebanyak 3 kali. Ujian Anda telah dikunci secara otomatis. Silakan hubungi pengawas/admin.");
+            window.location.href = "/siswa/ujian?error=violation_lock";
+            return;
+        }
+
+        if (data.status === 1) {
+            const count = data.violationCount;
+            const remaining = 3 - count;
+            alert(`ΓÜá∩╕Å PERINGATAN PELANGGARAN!\n\nAnda dilarang meninggalkan halaman ujian atau membuka tab baru.\nPelanggaran ke-${count}/3.\nJika Anda melanggar ${remaining} kali lagi, ujian akan OTOMATIS TERKUNCI.`);
+        }
+    } catch (e) {
+        console.error("Violation check failed:", e);
+    }
+}
+
+// ΓöÇΓöÇΓöÇ RENDER QUESTION ΓöÇΓöÇΓöÇ
+function render() {
+    const q = state.questions[cur];
+    if (!q) return;
+
+    // Number badges
+    ["header-q-num", "q-num"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = q.orderIdx.toString();
+    });
+    const badge = document.getElementById("q-badge");
+    if (badge) badge.textContent = q.orderIdx.toString();
+
+    // Flag button state
+    const flagBtn = document.getElementById("flag-btn");
+    if (flagBtn) {
+        flagBtn.className = q.isDoubtful
+            ? "flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition border border-amber-400 text-amber-600 bg-amber-50"
+            : "flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300 text-xs sm:text-sm font-bold transition whitespace-nowrap";
+    }
+
+    // Question content
+    const contentEl = document.getElementById("question-content");
+    if (contentEl) {
+        let html = q.qText || "<em class='text-slate-400'>Soal tidak tersedia</em>";
+        if (q.qAudioPath) {
+            html = `<div class="mb-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
+                <i class="icon-volume-2 text-primary-500 w-5 h-5 shrink-0"></i>
+                <audio controls src="${q.qAudioPath}" class="w-full h-9 accent-primary-600"></audio>
+            </div>` + html;
+        }
+        contentEl.innerHTML = html;
+    }
+
+    // Answer options
+    const optsEl = document.getElementById("options-container");
+    if (optsEl) {
+        const charMap = ["A", "B", "C", "D", "E", "F"];
+        let html = "";
+
+        if (q.qType === 1) {
+            if (q.answers.length === 0) {
+                html = `<div class="p-5 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm font-medium flex items-center gap-2">
+                    <i class="icon-alert-triangle w-4 h-4 shrink-0"></i>
+                    Pilihan jawaban belum tersedia. Hubungi pengawas.
+                </div>`;
+            } else {
+                q.answers.forEach((ans, idx) => {
+                    const ch = charMap[idx] ?? String(idx + 1);
+                    const sel = ans.isSelected;
+                    html += `
+                    <label class="opt-label flex items-stretch rounded-xl border-2 cursor-pointer overflow-hidden
+                        ${sel ? "border-primary-500 shadow-md shadow-primary-100" : "border-slate-200 hover:border-primary-300 hover:shadow-sm"}">
+                        <!-- Letter -->
+                        <div class="w-11 sm:w-12 flex items-center justify-center shrink-0 border-r-2
+                            ${sel ? "bg-primary-600 border-primary-500" : "bg-slate-50 border-slate-200"}
+                            transition-colors">
+                            <span class="text-sm font-black ${sel ? "text-white" : "text-slate-400"}">${ch}</span>
+                        </div>
+                        <!-- Content -->
+                        <div class="flex items-start gap-3 flex-1 px-4 py-3.5 ${sel ? "bg-primary-50/50" : "bg-white"}">
+                            <input
+                                type="radio"
+                                name="q${q.tqId}"
+                                value="${ans.ansId}"
+                                ${sel ? "checked" : ""}
+                                onchange="saveAnswer(${q.tqId}, ${ans.ansId})"
+                                class="mt-0.5 w-4 h-4 flex-shrink-0 accent-primary-600">
+                            <div class="flex-1 text-slate-800 text-sm sm:text-base leading-relaxed">${ans.ansText}</div>
+                        </div>
+                    </label>`;
+                });
+            }
+        } else if (q.qType === 2 || q.qType === 3) {
+            html = `
+            <div class="space-y-3">
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">Jawaban Anda:</label>
+                <textarea
+                    id="essay-input"
+                    class="w-full p-4 border-2 border-slate-200 rounded-xl text-sm text-slate-800 focus:border-primary-500 focus:outline-none resize-none bg-white transition min-h-[160px]"
+                    placeholder="Ketik jawaban Anda di sini..."
+                    onblur="saveTextAnswer(${q.tqId}, this.value)">${q.answerText || ""}</textarea>
+                <div class="text-[10px] text-slate-400 italic flex items-center gap-1">
+                    <i class="icon-info w-3 h-3"></i> Jawaban otomatis tersimpan saat Anda berpindah soal atau klik di luar area input.
+                </div>
+            </div>`;
+        }
+
+        optsEl.innerHTML = html;
+    }
+
+    // Nav button states
+    const total = state.questions.length;
+    ["btn-prev","btn-prev-m"].forEach(id => {
+        const b = document.getElementById(id) as HTMLButtonElement;
+        if (b) { b.disabled = cur === 0; b.style.opacity = cur === 0 ? "0.35" : "1"; }
+    });
+    updateNextButton();
+
+    // Scroll question area to top
+    document.getElementById("question-panel-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// ΓöÇΓöÇΓöÇ RENDER NAV GRID ΓöÇΓöÇΓöÇ
+function renderGrid() {
+    const grid = document.getElementById("nav-grid");
+    if (!grid) return;
+
+    let answered = 0;
+    let html = "";
+
+    state.questions.forEach((q, idx) => {
+        const isAns = q.qType === 1 
+            ? q.answers.some(a => a.isSelected)
+            : !!(q.answerText && q.answerText.trim());
+        
+        if (isAns) answered++;
+
+        let cls = "w-full aspect-square rounded-lg font-bold font-mono text-xs transition-all duration-150 border ";
+        if (q.isDoubtful) cls += "bg-amber-400 border-amber-400 text-slate-900";
+        else if (isAns) cls += "bg-primary-600 border-primary-600 text-white";
+        else cls += "bg-white border-slate-200 text-slate-500 hover:border-primary-400 hover:bg-primary-50";
+        if (idx === cur) cls += " ring-2 ring-offset-1 ring-primary-500 scale-110 z-10";
+
+        html += `<button onclick="jumpTo(${idx})" class="${cls}">${q.orderIdx}</button>`;
+    });
+
+    grid.innerHTML = html;
+
+    const countEl = document.getElementById("answered-count");
+    if (countEl) countEl.textContent = answered.toString();
+
+    const badge = document.getElementById("nav-badge");
+    if (badge) {
+        badge.textContent = answered.toString();
+        badge.classList.toggle("hidden", answered === 0);
+    }
+}
+
+// ΓöÇΓöÇΓöÇ PROGRESS ΓöÇΓöÇΓöÇ
+function updateProgress() {
+    const total = state.questions.length;
+    const ans = state.questions.filter(q => {
+        return q.qType === 1 
+            ? q.answers.some(a => a.isSelected)
+            : !!(q.answerText && q.answerText.trim());
+    }).length;
+    const pct = total > 0 ? (ans / total) * 100 : 0;
+    const bar = document.getElementById("progress-bar");
+    const side = document.getElementById("side-progress");
+    if (bar) bar.style.width = `${pct}%`;
+    if (side) side.style.width = `${pct}%`;
+}
+
+// ΓöÇΓöÇΓöÇ INTERACTIONS ΓöÇΓöÇΓöÇ
+(window as any).jumpTo = (idx: number) => {
+    cur = idx;
+    render();
+    renderGrid();
+    // Close nav panel on mobile after jump
+    closeNavPanel();
+};
+
+// ΓöÇΓöÇΓöÇ SMART NEXT BUTTON ΓöÇΓöÇΓöÇ
+function updateNextButton() {
+    const total = state.questions.length;
+    const isLast = cur === total - 1;
+
+    const unanswered = state.questions.filter(q => {
+        if (q.qType === 1) return !q.answers.some(a => a.isSelected);
+        return !(q.answerText && q.answerText.trim());
+    }).length;
+    const doubtful = state.questions.filter(q => q.isDoubtful).length;
+    const allClear = unanswered === 0 && doubtful === 0;
+
+    ["btn-next", "btn-next-m"].forEach(id => {
+        const b = document.getElementById(id) as HTMLButtonElement;
+        if (!b) return;
+
+        if (isLast) {
+            // Last question: transform to Selesai
+            if (allClear) {
+                // Γ£à All done ΓÇö green, enabled
+                b.className = b.id === "btn-next"
+                    ? "flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm transition shadow-md flex justify-center items-center gap-1"
+                    : "flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm transition shadow-md flex justify-center items-center gap-1.5";
+                b.disabled = false;
+                b.style.opacity = "1";
+                b.innerHTML = `<i class="icon-check-circle w-4 h-4"></i> Selesai`;
+                b.title = "Selesaikan ujian";
+            } else {
+                // ≡ƒöÆ Still has issues ΓÇö red disabled with tooltip
+                let tip = [];
+                if (unanswered > 0) tip.push(`${unanswered} soal belum dijawab`);
+                if (doubtful > 0) tip.push(`${doubtful} soal masih ragu-ragu`);
+                b.className = b.id === "btn-next"
+                    ? "flex-1 py-2.5 bg-slate-300 text-slate-500 rounded-xl font-bold text-sm flex justify-center items-center gap-1 cursor-not-allowed"
+                    : "flex-1 py-3 bg-slate-300 text-slate-500 rounded-xl font-bold text-sm flex justify-center items-center gap-1.5 cursor-not-allowed";
+                b.disabled = true;
+                b.style.opacity = "1";
+                b.innerHTML = `<i class="icon-lock w-4 h-4"></i> Selesai`;
+                b.title = tip.join(" & ");
+            }
+        } else {
+            // Not last: normal Next
+            b.className = b.id === "btn-next"
+                ? "flex-1 py-2.5 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm transition shadow-md flex justify-center items-center gap-1"
+                : "flex-1 py-3 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm transition shadow-md flex justify-center items-center gap-1.5";
+            b.disabled = false;
+            b.style.opacity = "1";
+            b.innerHTML = b.id === "btn-next" ? `Next <i class="icon-chevron-right w-4 h-4"></i>` : `Next <i class="icon-chevron-right w-4 h-4"></i>`;
+            b.title = "";
+        }
+    });
+}
+
+// ΓöÇΓöÇΓöÇ SMART NEXT / FINISH ΓöÇΓöÇΓöÇ
+(window as any).smartNext = () => {
+    const total = state.questions.length;
+    if (cur < total - 1) {
+        // Navigate to next question
+        cur++;
+        render();
+        renderGrid();
+    } else {
+        // On last question ΓÇö act as Selesai
+        const unanswered = state.questions.filter(q => {
+            if (q.qType === 1) return !q.answers.some(a => a.isSelected);
+            return !(q.answerText && q.answerText.trim());
+        }).length;
+        const doubtful = state.questions.filter(q => q.isDoubtful).length;
+        if (unanswered === 0 && doubtful === 0) {
+            (window as any).finishTest();
+        }
+        // If disabled, do nothing (button is disabled anyway)
+    }
+};
+
+(window as any).navigateItem = (offset: number) => {
+    const n = cur + offset;
+    if (n >= 0 && n < state.questions.length) {
+        cur = n;
+        render();
+        renderGrid();
+    }
+};
+
+(window as any).toggleFlag = () => {
+    const q = state.questions[cur];
+    q.isDoubtful = !q.isDoubtful;
+    render();
+    renderGrid();
+    updateNextButton();
+    (window as any).bgFetch("/api/peserta/simpan-jawaban", { action: "flag", testQuestionId: q.tqId, isDoubtful: q.isDoubtful });
+};
+
+(window as any).saveAnswer = (tqId: number, ansId: number) => {
+    const q = state.questions.find(x => x.tqId === tqId);
+    if (q) {
+        q.answers.forEach(a => a.isSelected = false);
+        const a = q.answers.find(x => x.ansId === ansId);
+        if (a) a.isSelected = true;
+        render();
+        renderGrid();
+        updateProgress();
+        updateNextButton();
+        (window as any).bgFetch("/api/peserta/simpan-jawaban", { action: "answer", testQuestionId: tqId, answerId: ansId });
+    }
+};
+
+(window as any).saveTextAnswer = (tqId: number, text: string) => {
+    const q = state.questions.find(x => x.tqId === tqId);
+    if (q) {
+        q.answerText = text;
+        renderGrid();
+        updateProgress();
+        updateNextButton();
+        (window as any).bgFetch("/api/peserta/simpan-jawaban", { action: "save_text", testQuestionId: tqId, answerText: text });
+    }
+};
+
+(window as any).finishTest = () => {
+    const unansweredArr = state.questions.filter(q => {
+        if (q.qType === 1) return !q.answers.some(a => a.isSelected);
+        return !(q.answerText && q.answerText.trim());
+    });
+    const unanswered = unansweredArr.length;
+    const doubtful = state.questions.filter(q => q.isDoubtful).length;
+    const total = state.questions.length;
+    
+    if (unanswered > 0 || doubtful > 0) {
+        let errs = [];
+        if (unanswered > 0) errs.push(`${unanswered} soal belum dijawab`);
+        if (doubtful > 0) errs.push(`${doubtful} soal masih ragu-ragu`);
+        alert(`Ujian tidak dapat diselesaikan!\n\nMasih ada ${errs.join(" dan ")}.\nSilakan periksa kembali lembar jawaban Anda.`);
+        return;
+    }
+
+    let msg = `Anda telah menjawab dan meyakini semua ${total} soal.\n\nSelesaikan ujian sekarang?`;
+    
+    isSystemAction = true;
+    const ok = confirm(msg);
+    if (ok) {
+        window.location.href = `/api/peserta/selesai?sessionId=${state.session.id}`;
+    } else {
+        isSystemAction = false;
+    }
+};
+
+// ΓöÇΓöÇΓöÇ MOBILE NAV TOGGLE ΓöÇΓöÇΓöÇ
+let navOpen = false;
+function closeNavPanel() {
+    if (!navOpen) return;
+    document.getElementById("nav-panel")?.classList.add("translate-y-full");
+    document.getElementById("nav-panel")?.classList.remove("translate-y-0");
+    document.getElementById("nav-overlay")?.classList.add("hidden");
+    navOpen = false;
+}
+(window as any).toggleNavPanel = () => {
+    const panel = document.getElementById("nav-panel");
+    const overlay = document.getElementById("nav-overlay");
+    if (!panel) return;
+    navOpen = !navOpen;
+    if (navOpen) {
+        panel.classList.remove("translate-y-full");
+        panel.classList.add("translate-y-0");
+        overlay?.classList.remove("hidden");
+    } else {
+        panel.classList.add("translate-y-full");
+        panel.classList.remove("translate-y-0");
+        overlay?.classList.add("hidden");
+    }
+};
+
+// ΓöÇΓöÇΓöÇ BACKGROUND FETCH ΓöÇΓöÇΓöÇ
+async function bgFetch(url: string, payload: any) {
+    const sync = document.getElementById("sync-status");
+    if (sync) {
+        sync.classList.remove("opacity-0");
+        sync.classList.add("text-emerald-500");
+        sync.innerHTML = `<i class="icon-refresh-cw w-3 h-3 animate-spin"></i> <span>Saving</span>`;
+    }
+    
+    try {
+        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        if (sync) {
+            if (res.ok) {
+                sync.innerHTML = `<i class="icon-check w-3 h-3"></i> <span>Saved</span>`;
+                setTimeout(() => sync.classList.add("opacity-0"), 2000);
+            } else {
+                sync.classList.replace("text-emerald-500", "text-rose-500");
+                sync.innerHTML = `<i class="icon-alert-circle w-3 h-3"></i> <span>Fail</span>`;
+                alert(`ΓÜá∩╕Å GAGAL MENYIMPAN JAWABAN!\n\nKoneksi ke server terputus atau sesi Anda tidak valid.\nData terakhir gagal direkam!\n\nHarap REFRESH halaman ini (F5) sekarang juga sebelum melanjutkan!`);
+            }
+        }
+    } catch (e) {
+        console.error("Save failed:", e);
+        if (sync) {
+            sync.classList.replace("text-emerald-500", "text-rose-500");
+            sync.innerHTML = `<i class="icon-wifi-off w-3 h-3"></i> <span>Offline</span>`;
+        }
+        alert(`ΓÜá∩╕Å INTERNET TERPUTUS!\n\nJawaban terakhir Anda GAGAL tersimpan ke server.\nPastikan koneksi internet stabil lalu klik ulang jawaban Anda!`);
+    }
+}
+(window as any).bgFetch = bgFetch;
+
+// ΓöÇΓöÇΓöÇ TIMER ΓöÇΓöÇΓöÇ
+function startTimer() {
+    let secs = Number(state.test.durationMinutes) * 60;
+    const display = document.getElementById("countdown-timer");
+    const tick = () => {
+        if (secs <= 0) {
+            if (display) display.textContent = "HABIS";
+            window.location.href = `/api/peserta/selesai?sessionId=${state.session.id}`;
+            return;
+        }
+        const h = Math.floor(secs / 3600).toString().padStart(2, "0");
+        const m = Math.floor((secs % 3600) / 60).toString().padStart(2, "0");
+        const s = Math.floor(secs % 60).toString().padStart(2, "0");
+        if (display) {
+            display.textContent = `${h}:${m}:${s}`;
+            display.classList.toggle("warning", secs < 300);
+        }
+        secs--;
+    };
+    setInterval(tick, 1000);
+    tick();
+}
+</script>

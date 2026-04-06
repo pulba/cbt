@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { db } from "../../../../db";
-import { topics, testTopicSets } from "../../../../db/schema";
+import { topics, testTopicSets, questions, questionAnswers, testQuestions, essayConfigs } from "../../../../db/schema";
 import { eq, like, inArray, sql } from "drizzle-orm";
 
 export const GET: APIRoute = async ({ request }) => {
@@ -138,6 +138,30 @@ export const DELETE: APIRoute = async ({ request }) => {
                     error: `Gagal menghapus: Topik "${topic?.name}" sedang digunakan dalam konfigurasi Ujian.`
                 }), { status: 400 });
             }
+        }
+
+        // Find all questions belonging to these topics
+        const relatedQuestions = await db.select({ id: questions.id }).from(questions).where(inArray(questions.topicId, ids)).all();
+        const questionIds = relatedQuestions.map(q => q.id);
+
+        if (questionIds.length > 0) {
+            // Check if any question is actively locked in a test section
+            const usage = await db.select().from(testQuestions).where(inArray(testQuestions.questionId, questionIds)).limit(1).get();
+            if (usage) {
+                return new Response(JSON.stringify({
+                    success: false,
+                    error: `Gagal menghapus: Salah satu soal di dalam Topik ini sedang dikerjakan atau digunakan dalam ujian aktif.`
+                }), { status: 400 });
+            }
+
+            // Delete all question answers mapping to these questions
+            await db.delete(questionAnswers).where(inArray(questionAnswers.questionId, questionIds));
+            
+            // Delete all essay configs mapping to these questions
+            await db.delete(essayConfigs).where(inArray(essayConfigs.questionId, questionIds));
+            
+            // Delete the questions themselves
+            await db.delete(questions).where(inArray(questions.id, questionIds));
         }
 
         await db.delete(topics).where(inArray(topics.id, ids));

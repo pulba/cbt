@@ -12,22 +12,52 @@ const { title } = Astro.props;
 const user = Astro.locals.user;
 
 // Fetch system configs
-const allConfigs = await db.select().from(configs).all();
-const getConfig = (key: string) => allConfigs.find(c => c.key === key)?.value || "";
-const cbtNama = getConfig("cbt_nama") || "SAS CBT";
+import { sql } from 'drizzle-orm';
+const allConfigs = await db.select({ 
+    key: configs.key, 
+    value: sql<string>`CASE WHEN ${configs.key} = 'school_logo' THEN '1' ELSE ${configs.value} END` 
+}).from(configs).all();
+const getConfig = (key: string) =>
+    allConfigs.find((c: any) => c.key === key)?.value || "";
+const cbtNama = getConfig("cbt_nama") || "CBT";
 const schoolName = getConfig("school_name") || "Sekolah";
+const hasLogo = !!getConfig("school_logo");
 
 const allMenuItems = [
-    { label: "Dashboard", href: "/admin", icon: "grid", roles: ['admin', 'guru', 'operator'] },
-    { label: "Bank Soal", href: "/admin/soal", icon: "book", roles: ['admin', 'guru'] },
-    { label: "Peserta", href: "/admin/peserta", icon: "users", roles: ['admin', 'guru'] },
-    { label: "Ujian", href: "/admin/ujian", icon: "clipboard", roles: ['admin', 'guru'] },
-    { label: "Hasil & Laporan", href: "/admin/hasil", icon: "bar-chart", roles: ['admin', 'guru', 'operator'] },
-    { label: "Pengaturan", href: "/admin/pengaturan", icon: "settings", roles: ['admin'] },
+    {
+        label: "Dashboard",
+        href: "/admin",
+        icon: "grid",
+        roles: ["admin", "guru", "operator"],
+    },
+    {
+        label: "Bank Soal",
+        href: "/admin/soal",
+        icon: "book",
+        roles: ["admin", "guru"],
+    },
+    {
+        label: "Peserta",
+        href: "/admin/peserta",
+        icon: "users",
+        roles: ["admin", "guru"],
+    },
+    {
+        label: "Ujian",
+        href: "/admin/ujian",
+        icon: "clipboard",
+        roles: ["admin", "guru"],
+    },
+    {
+        label: "Hasil & Laporan",
+        href: "/admin/hasil",
+        icon: "bar-chart",
+        roles: ["admin", "guru", "operator"],
+    },
 ];
 
-const role = user?.role || 'admin';
-const menuItems = allMenuItems.filter(item => item.roles.includes(role));
+const role = user?.role || "admin";
+const menuItems = allMenuItems.filter((item) => item.roles.includes(role));
 
 const currentPath = Astro.url.pathname;
 ---
@@ -40,44 +70,62 @@ const currentPath = Astro.url.pathname;
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Amiri:wght@400;700&display=swap"
             rel="stylesheet"
         />
-
+        <link rel="icon" href={hasLogo ? "/api/public/logo" : "/favicon.svg"} />
         <title>{title} | {cbtNama} Admin</title>
+        
+        <!-- MathJax Configuration for OMML/LaTeX rendering -->
+        <script is:inline>
+            window.MathJax = {
+                tex: {
+                    inlineMath: [['\\(', '\\)'], ['$', '$']],
+                    displayMath: [['\\[', '\\]'], ['$$', '$$']],
+                    processEscapes: true
+                },
+                options: {
+                    ignoreHtmlClass: 'tex2jax_ignore',
+                    processHtmlClass: 'tex2jax_process'
+                }
+            };
+        </script>
+        <script is:inline id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     </head>
-    <body class="h-full bg-surface-50 text-surface-800">
-        <div class="flex h-screen overflow-hidden">
+    <body class="h-full bg-surface-50 text-surface-800 print:bg-white">
+        <div class="flex h-screen overflow-hidden print:h-auto print:overflow-visible print:block">
             <!-- Sidebar -->
             <aside
                 id="admin-sidebar"
-                class="fixed inset-y-0 left-0 z-50 w-64 bg-surface-900 text-white shadow-xl transform -translate-x-full lg:translate-x-0 lg:static lg:inset-auto lg:flex lg:flex-col transition-transform duration-300 ease-in-out"
+                class="fixed inset-y-0 left-0 z-50 w-64 px-3 bg-surface-900 text-white shadow-xl transform -translate-x-full lg:translate-x-0 lg:static lg:inset-auto lg:flex lg:flex-col transition-transform duration-300 ease-in-out print:hidden"
             >
                 <!-- Brand -->
                 <div
                     class="flex items-center gap-3 px-6 py-5 border-b border-white/10"
                 >
-                    <div
-                        class="w-9 h-9 rounded-lg bg-primary-500 flex items-center justify-center font-bold text-sm shrink-0"
-                    >
-                        CBT
-                    </div>
+                    <img
+                        src={hasLogo ? "/api/public/logo" : "/favicon.svg"}
+                        alt="Logo"
+                        class="w-9 h-9 rounded-lg object-contain bg-white/10 p-1 shrink-0"
+                    />
                     <div class="min-w-0">
-                        <h1 class="text-sm font-semibold tracking-wide truncate">
+                        <h1
+                            class="text-sm font-semibold tracking-wide truncate"
+                        >
                             {schoolName}
                         </h1>
                         <p class="text-[11px] text-white/50">Admin Panel</p>
                     </div>
                 </div>
 
-                <!-- Navigation -->
-                <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                <nav class="py-4 space-y-1 overflow-y-auto">
                     {
                         menuItems.map((item) => {
                             const isActive =
                                 currentPath === item.href ||
                                 (item.href !== "/admin" &&
                                     currentPath.startsWith(item.href));
+
                             return (
                                 <a
                                     href={item.href}
@@ -85,7 +133,7 @@ const currentPath = Astro.url.pathname;
                                         "flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150",
                                         isActive
                                             ? "bg-primary-600 text-white shadow-md shadow-primary-600/30"
-                                            : "text-white/60 hover:text-white hover:bg-white/8",
+                                            : "text-surface-400 hover:text-white hover:bg-white/8",
                                     ]}
                                 >
                                     <i class={`icon-${item.icon} w-4 h-4`} />
@@ -95,59 +143,52 @@ const currentPath = Astro.url.pathname;
                         })
                     }
                 </nav>
-
-                <!-- User Info -->
-                <div class="px-4 py-4 border-t border-white/10">
-                    <div class="flex items-center gap-3">
-                        <div
-                            class="w-8 h-8 rounded-full bg-primary-400/20 flex items-center justify-center text-primary-300 text-xs font-bold"
-                        >
-                            {user?.username?.charAt(0).toUpperCase() || "A"}
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <p class="text-xs font-medium truncate">
-                                {user?.username || "Admin"}
-                            </p>
-                            <p class="text-[10px] text-white/40 capitalize">
-                                {user?.role || "admin"}
-                            </p>
-                        </div>
+                <div class="border-t border-surface-800 mt-12 mb-2">
+                    <p
+                        class="text-[10px] font-bold text-white uppercase tracking-widest pt-3 pl-3"
+                    >
+                        Aktivitas
+                    </p>
+                    <div class="space-y-1">
                         <a
-                            href="/api/auth/logout"
-                            class="text-white/30 hover:text-white/70 transition"
+                            href="/admin/monitoring"
+                            class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-surface-400 hover:text-white hover:bg-white/8 transition"
                         >
-                            <i class="icon-log-out w-4 h-4"></i>
+                            <i class="icon-activity w-5 h-5 text-surface-500"
+                            ></i>
+                            Live Monitoring
+                        </a>
+                        <a
+                            href="/admin/peserta/reset"
+                            class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-surface-400 hover:text-white hover:bg-white/8 transition"
+                        >
+                            <i class="icon-key w-5 h-5 text-surface-500"></i>
+                            Status Login
+                        </a>
+                        <a
+                            href="/admin/pengaturan"
+                            class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-surface-400 hover:text-white hover:bg-white/8 transition"
+                        >
+                            <i class="icon-settings w-5 h-5 text-surface-500"
+                            ></i>
+                            Pengaturan
                         </a>
                     </div>
                 </div>
-                <p
-                    class="text-[10px] font-bold text-surface-400 uppercase tracking-widest mt-6 mb-2 pl-3"
-                >
-                    Aktivitas
-                </p>
-                <div class="space-y-1">
-                    <a
-                        href="/admin/monitoring"
-                        class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-surface-600 hover:text-white hover:bg-white/8 transition"
+                <div class="mt-auto mb-4 pt-6">
+                    <p
+                        class="text-[11px] text-center text-white/30 font-medium"
                     >
-                        <i class="icon-activity w-5 h-5 text-surface-400"></i>
-                         Live Monitoring
-                    </a>
-                    <a
-                        href="/admin/peserta/reset"
-                        class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-surface-600 hover:text-white hover:bg-white/8 transition"
-                    >
-                        <i class="icon-key w-5 h-5 text-surface-400"></i>
-                         Status Login
-                    </a>
+                        Versi 2.0.0
+                    </p>
                 </div>
             </aside>
 
             <!-- Main Content -->
-            <div class="flex-1 flex flex-col overflow-hidden">
+            <div class="flex-1 flex flex-col overflow-hidden print:overflow-visible print:block">
                 <!-- Top Bar -->
                 <header
-                    class="h-14 bg-white border-b border-surface-200 flex items-center justify-between px-6 shrink-0"
+                    class="h-14 bg-white border-b border-surface-200 flex items-center justify-between px-6 shrink-0 print:hidden"
                 >
                     <div class="flex items-center gap-3">
                         <button
@@ -160,7 +201,7 @@ const currentPath = Astro.url.pathname;
                             {title}
                         </h2>
                     </div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-3">
                         <span class="text-xs text-surface-500 hidden sm:block"
                             >{
                                 new Date().toLocaleDateString("id-ID", {
@@ -171,40 +212,65 @@ const currentPath = Astro.url.pathname;
                                 })
                             }</span
                         >
+                        <div class="h-5 w-px bg-surface-200 hidden sm:block">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div
+                                class="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 text-xs font-bold"
+                            >
+                                {user?.username?.charAt(0).toUpperCase() || "A"}
+                            </div>
+                            <span
+                                class="text-xs font-medium text-surface-700 hidden md:block"
+                                >{user?.username || "Admin"}</span
+                            >
+                        </div>
+                        <a
+                            href="/api/auth/logout"
+                            title="Logout"
+                            class="w-7 h-7 rounded-lg hover:bg-rose-50 hover:text-rose-600 text-surface-400 flex items-center justify-center transition"
+                        >
+                            <i class="icon-log-out w-4 h-4"></i>
+                        </a>
                     </div>
                 </header>
 
                 <!-- Page Content -->
-                <main class="flex-1 overflow-y-auto p-6">
+                <main class="flex-1 overflow-y-auto p-6 print:overflow-visible print:p-0 print:h-auto">
                     <slot />
                 </main>
             </div>
         </div>
 
         <!-- Sidebar Overlay (Mobile) -->
-        <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 z-40 hidden lg:hidden"></div>
+        <div
+            id="sidebar-overlay"
+            class="fixed inset-0 bg-black/50 z-40 hidden lg:hidden"
+        >
+        </div>
 
         <script>
-            const mobileMenuBtn = document.getElementById('mobile-menu-btn');
-            const adminSidebar = document.getElementById('admin-sidebar');
-            const sidebarOverlay = document.getElementById('sidebar-overlay');
+            const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+            const adminSidebar = document.getElementById("admin-sidebar");
+            const sidebarOverlay = document.getElementById("sidebar-overlay");
 
             if (mobileMenuBtn && adminSidebar && sidebarOverlay) {
                 const toggleSidebar = () => {
-                    const isHidden = adminSidebar.classList.contains('-translate-x-full');
+                    const isHidden =
+                        adminSidebar.classList.contains("-translate-x-full");
                     if (isHidden) {
-                        adminSidebar.classList.remove('-translate-x-full');
-                        sidebarOverlay.classList.remove('hidden');
-                        document.body.style.overflow = 'hidden';
+                        adminSidebar.classList.remove("-translate-x-full");
+                        sidebarOverlay.classList.remove("hidden");
+                        document.body.style.overflow = "hidden";
                     } else {
-                        adminSidebar.classList.add('-translate-x-full');
-                        sidebarOverlay.classList.add('hidden');
-                        document.body.style.overflow = '';
+                        adminSidebar.classList.add("-translate-x-full");
+                        sidebarOverlay.classList.add("hidden");
+                        document.body.style.overflow = "";
                     }
                 };
 
-                mobileMenuBtn.addEventListener('click', toggleSidebar);
-                sidebarOverlay.addEventListener('click', toggleSidebar);
+                mobileMenuBtn.addEventListener("click", toggleSidebar);
+                sidebarOverlay.addEventListener("click", toggleSidebar);
             }
         </script>
     </body>

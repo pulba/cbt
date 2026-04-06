@@ -30,6 +30,7 @@ const rawTests = await db
         detail: tests.detail,
         isActive: tests.isActive,
         showResult: tests.showResult,
+        mode: tests.mode,
     })
     .from(tests)
     .innerJoin(testGroups, eq(tests.id, testGroups.testId))
@@ -83,6 +84,34 @@ const availableTests = await Promise.all(rawTests.filter(t => t.isActive).map(as
     };
 }));
 
+// Sort tests: Open (earliest deadline first) > Upcoming > Empty > Finished > Locked > Closed
+availableTests.sort((a, b) => {
+    const getPriority = (status: string) => {
+        if (status === 'open') return 1;
+        if (status === 'upcoming') return 2;
+        if (status === 'empty') return 3;
+        if (status === 'finished') return 4;
+        if (status === 'locked') return 5;
+        return 6; // closed
+    };
+    
+    const pA = getPriority(a.status);
+    const pB = getPriority(b.status);
+    if (pA !== pB) return pA - pB;
+    
+    // If both 'open', prioritize earliest closing time
+    if (a.status === 'open' && b.status === 'open') {
+        const timeA = a.endTime ? new Date(a.endTime).getTime() : Infinity;
+        const timeB = b.endTime ? new Date(b.endTime).getTime() : Infinity;
+        if (timeA !== timeB) return timeA - timeB;
+    }
+    
+    // Fallback sort by beginTime
+    const beginA = a.beginTime ? new Date(a.beginTime).getTime() : 0;
+    const beginB = b.beginTime ? new Date(b.beginTime).getTime() : 0;
+    return beginA - beginB;
+});
+
 // Error handling from query params
 const error = Astro.url.searchParams.get('error');
 let errorMessage = "";
@@ -92,9 +121,7 @@ if (error === 'violation_lock') {
     errorMessage = "⚠️ AKSES DITOLAK: Ujian ini hanya dapat dikerjakan melalui aplikasi Xambro / Exambrowser.";
 }
 
-// Fetch Information/Announcement
-const infoConfig = await db.select().from(configs).where(eq(configs.key, "cbt_informasi")).get();
-const informasi = infoConfig?.value || "";
+// Removed Papan Pengumuman
 
 const now = new Date();
 const dateStr = now.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -161,24 +188,7 @@ const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-di
         </div>
     </div>
 
-    <!-- Announcement Section -->
-    {informasi && (
-        <div class="mb-8 bg-amber-50 border-2 border-amber-200 rounded-2xl p-6 shadow-sm relative overflow-hidden">
-            <div class="absolute -top-6 -right-6 w-24 h-24 bg-amber-100/50 rounded-full blur-2xl"></div>
-            <div class="flex gap-4 relative z-10">
-                <div class="w-12 h-12 shrink-0 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center border border-amber-200">
-                    <i class="icon-megaphone text-2xl"></i>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <h3 class="text-sm font-bold text-amber-800 uppercase tracking-wider mb-1 flex items-center gap-2">
-                        Papan Pengumuman
-                        <span class="flex h-2 w-2 rounded-full bg-amber-500 animate-ping"></span>
-                    </h3>
-                    <div class="text-amber-900/80 leading-relaxed text-sm prose prose-amber max-w-none" set:html={informasi} />
-                </div>
-            </div>
-        </div>
-    )}
+
 
     <!-- Tata Tertib & Peringatan Section (Accordion) -->
     <div class="mb-8 bg-white border-2 border-rose-100 rounded-2xl overflow-hidden shadow-sm transition-all duration-300">
@@ -374,7 +384,7 @@ const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-di
                                     </div>
                                 ) : test.sessionStatus === 1 ? (
                                     <button
-                                        onclick={`startExam(${test.id}, null)`}
+                                        onclick={`startExam(${test.id}, '${test.mode || 'standard'}')`}
                                         class="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-amber-600/20 flex justify-center items-center gap-2 group-hover:shadow-amber-600/40"
                                     >
                                         Lanjutkan Ujian
@@ -382,7 +392,7 @@ const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-di
                                     </button>
                                 ) : (
                                     <button
-                                        onclick={`startExam(${test.id}, null)`}
+                                        onclick={`startExam(${test.id}, '${test.mode || 'standard'}')`}
                                         class="w-full py-3 px-4 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-600/20 flex justify-center items-center gap-2 group-hover:shadow-primary-600/40"
                                     >
                                         Mulai Ujian
@@ -510,9 +520,9 @@ const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-di
         if (e.key === 'Enter') (window as any).verifyTokenAndStart();
     });
 
-    (window as any).startExam = (testId: number, _token: null) => {
+    (window as any).startExam = (testId: number, mode: string) => {
         // Go to confirmation page first
-        window.location.href = `/siswa/konfirmasi/${testId}`;
+        window.location.href = mode === 'tka' ? `/siswa/tka/konfirmasi/${testId}` : `/siswa/konfirmasi/${testId}`;
     };
 
     (window as any).verifyTokenAndStart = async () => {

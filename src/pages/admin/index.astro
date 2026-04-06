@@ -1,39 +1,96 @@
 ---
 import AdminLayout from "../../layouts/AdminLayout.astro";
 import { db } from "../../db";
-import { users, questions, tests, topics, testUsers } from "../../db/schema";
-import { count } from "drizzle-orm";
+import {
+    users,
+    questions,
+    tests,
+    topics,
+    admins,
+    configs,
+    testQuestions,
+    testTopicSets,
+    testUsers,
+} from "../../db/schema";
+import { count, eq, sum } from "drizzle-orm";
+
+import { sql } from 'drizzle-orm';
+const allConfigs = await db.select({ 
+    key: configs.key, 
+    value: sql<string>`CASE WHEN ${configs.key} = 'school_logo' THEN '1' ELSE ${configs.value} END` 
+}).from(configs).all();
+const getConfig = (key: string) =>
+    allConfigs.find((c: any) => c.key === key)?.value || "";
+const schoolLogo = getConfig("school_logo");
+const schoolName = getConfig("school_name") || "SAS CBT";
 
 // Fetch stats
 const [totalStudents] = await db.select({ value: count() }).from(users);
-const [totalQuestions] = await db.select({ value: count() }).from(questions);
+const [totalTeachers] = await db
+    .select({ value: count() })
+    .from(admins)
+    .where(eq(admins.level, "guru"));
+const [totalOnline] = await db.select({ value: count() }).from(testUsers).where(eq(testUsers.status, 1));
 const [totalTests] = await db.select({ value: count() }).from(tests);
 const [totalTopics] = await db.select({ value: count() }).from(topics);
+
+// Fetch scheduled tests for the calendar
+const allTestSchedulesRaw = await db
+    .select({
+        testId: tests.id,
+        testName: tests.name,
+        beginTime: testTopicSets.beginTime,
+        endTime: testTopicSets.endTime,
+    })
+    .from(testTopicSets)
+    .leftJoin(tests, eq(testTopicSets.testId, tests.id));
+
+// Filter out tests without boundaries, map correctly
+const calendarEvents = allTestSchedulesRaw
+    .filter((t: any) => t.beginTime && t.endTime)
+    .map((t: any) => ({
+        id: t.testId,
+        title: t.testName || "Ujian",
+        start: t.beginTime?.toISOString(),
+        end: t.endTime?.toISOString(),
+    }));
 
 const stats = [
     {
         label: "Total Siswa",
         value: totalStudents.value,
         icon: "users",
-        color: "bg-primary-500",
+        href: "/admin/peserta",
+        colorClasses: "border-b-blue-500",
+        iconContainer: "bg-blue-50 text-blue-600",
+        linkHover: "hover:text-blue-600",
     },
     {
-        label: "Bank Soal",
-        value: totalQuestions.value,
-        icon: "book-open",
-        color: "bg-emerald-500",
+        label: "Sedang Online",
+        value: totalOnline.value,
+        icon: "activity",
+        href: "/admin/monitoring",
+        colorClasses: "border-b-emerald-500",
+        iconContainer: "bg-emerald-50 text-emerald-600",
+        linkHover: "hover:text-emerald-600",
     },
     {
         label: "Ujian Aktif",
         value: totalTests.value,
         icon: "clipboard-check",
-        color: "bg-amber-500",
+        href: "/admin/ujian",
+        colorClasses: "border-b-amber-500",
+        iconContainer: "bg-amber-50 text-amber-600",
+        linkHover: "hover:text-amber-600",
     },
     {
         label: "Topik/Mapel",
         value: totalTopics.value,
         icon: "layers",
-        color: "bg-violet-500",
+        href: "/admin/soal",
+        colorClasses: "border-b-purple-500",
+        iconContainer: "bg-purple-50 text-purple-600",
+        linkHover: "hover:text-purple-600",
     },
 ];
 
@@ -42,104 +99,347 @@ const role = user?.role || "admin";
 ---
 
 <AdminLayout title="Dashboard">
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+    <!-- Modern Stats Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {
             stats.map((stat) => (
-                <div class="bg-white rounded-xl border border-surface-200 p-5 hover:shadow-lg hover:shadow-surface-200/50 transition-all duration-300">
+                <div class={`bg-white rounded-xl border border-surface-200 px-5 pt-5 pb-0 shadow-sm transition-all duration-300 flex flex-col hover:-translate-y-1 hover:shadow-md border-b-[4px] ${stat.colorClasses}`}>
                     <div class="flex items-center justify-between mb-3">
-                        <div
-                            class={`w-10 h-10 ${stat.color} rounded-lg flex items-center justify-center`}
-                        >
-                            <i class={`icon-${stat.icon} w-5 h-5 text-white`} />
+                        <span class="text-sm font-semibold text-surface-600">
+                            {stat.label}
+                        </span>
+                        <div class={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${stat.iconContainer}`}>
+                            <i class={`icon-${stat.icon} w-4 h-4`} />
                         </div>
                     </div>
-                    <p class="text-2xl font-bold text-surface-800">
+                    <p class="text-3xl font-extrabold text-surface-900 mb-4 tracking-tight">
                         {stat.value}
                     </p>
-                    <p class="text-xs text-surface-500 mt-1">{stat.label}</p>
+                    <a
+                        href={stat.href}
+                        class={`mt-auto flex items-center justify-between py-3 border-t border-surface-100 text-[11px] uppercase tracking-wider font-bold text-surface-400 transition-colors group ${stat.linkHover}`}
+                    >
+                        <span>Lihat Detail</span>
+                        <i class={`icon-chevron-right w-3 h-3 transition-transform group-hover:translate-x-1`} />
+                    </a>
                 </div>
             ))
         }
     </div>
 
-    <!-- Quick Actions -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white rounded-xl border border-surface-200 p-6">
-            <h3 class="text-2xl font-semibold text-red-700 mb-4">
-                Menu kkkkkkk
-            </h3>
-            <div class="grid grid-cols-2 gap-3">
-                {
-                    role !== "operator" && (
-                        <>
-                            <a
-                                href="/admin/soal"
-                                class="flex items-center gap-3 p-3 rounded-lg bg-surface-50 hover:bg-primary-50 hover:text-primary-700 transition-all text-sm text-surface-600 border border-transparent hover:border-primary-200"
-                            >
-                                <i class="icon-plus-circle w-4 h-4" />
-                                Tambah Soal
-                            </a>
-                            <a
-                                href="/admin/ujian"
-                                class="flex items-center gap-3 p-3 rounded-lg bg-surface-50 hover:bg-primary-50 hover:text-primary-700 transition-all text-sm text-surface-600 border border-transparent hover:border-primary-200"
-                            >
-                                <i class="icon-file-plus w-4 h-4" />
-                                Buat Ujian
-                            </a>
-                            <a
-                                href="/admin/peserta"
-                                class="flex items-center gap-3 p-3 rounded-lg bg-surface-50 hover:bg-primary-50 hover:text-primary-700 transition-all text-sm text-surface-600 border border-transparent hover:border-primary-200"
-                            >
-                                <i class="icon-user-plus w-4 h-4" />
-                                Tambah Peserta
-                            </a>
-                        </>
-                    )
-                }
-                <a
-                    href="/admin/hasil"
-                    class="flex items-center gap-3 p-3 rounded-lg bg-surface-50 hover:bg-primary-50 hover:text-primary-700 transition-all text-sm text-surface-600 border border-transparent hover:border-primary-200"
+    <!-- Kalender Kegiatan & Detail Panel -->
+    <div
+        class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white rounded-xl border border-surface-200 shadow-sm flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-surface-100"
+        id="calendar-widget"
+        data-events={JSON.stringify(calendarEvents)}
+    >
+        <!-- Main Calendar Section -->
+        <div class="w-full p-6">
+            <div class="flex items-start justify-between mb-6">
+                <div>
+                    <h3 class="font-bold text-surface-800 text-base">
+                        Kalender Kegiatan
+                    </h3>
+                    <p class="text-[11px] text-surface-400 italic">
+                        informasi kegiatan ujian, tugas dan elearning
+                    </p>
+                </div>
+                <button
+                    class="w-8 h-8 shrink-0 rounded-full border border-teal-500 text-teal-600 flex items-center justify-center hover:bg-teal-50 hover:scale-105 transition-all outline-none focus:ring-2 focus:ring-teal-100"
                 >
-                    <i class="icon-download w-4 h-4"></i>
-                    Unduh Nilai
-                </a>
-                <a
-                    href="/admin/monitoring"
-                    class="flex items-center gap-3 p-3 rounded-lg bg-surface-50 hover:bg-primary-50 hover:text-primary-700 transition-all text-sm text-surface-600 border border-transparent hover:border-primary-200"
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        ><path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M12 4.5v15m7.5-7.5h-15"></path></svg
+                    >
+                </button>
+            </div>
+
+            <div class="mt-2">
+                <div class="flex items-center justify-between mb-4 px-2">
+                    <button
+                        id="prev-month"
+                        class="w-8 h-8 rounded-full border border-surface-200 flex items-center justify-center text-surface-500 hover:bg-surface-100 transition-colors"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            ><path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M15.75 19.5L8.25 12l7.5-7.5"></path></svg
+                        >
+                    </button>
+                    <span
+                        id="current-month-label"
+                        class="font-extrabold text-sm text-surface-900 tracking-wide"
+                        >Maret 2026</span
+                    >
+                    <button
+                        id="next-month"
+                        class="w-8 h-8 rounded-full border border-surface-200 flex items-center justify-center text-surface-500 hover:bg-surface-100 transition-colors"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            ><path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M8.25 4.5l7.5 7.5-7.5 7.5"></path></svg
+                        >
+                    </button>
+                </div>
+                <div
+                    class="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-surface-400 mb-2"
                 >
-                    <i class="icon-activity w-4 h-4"></i>
-                    Buka Monitoring
-                </a>
+                    <div>Min</div><div>Sen</div><div>Sel</div><div>Rab</div><div
+                    >
+                        Kam
+                    </div><div>Jum</div><div>Sab</div>
+                </div>
+                <div class="grid grid-cols-7 gap-1" id="calendar-grid">
+                    <!-- JS akan mengisinya -->
+                </div>
             </div>
         </div>
 
-        <div class="bg-white rounded-xl border border-surface-200 p-6">
-            <h3 class="text-sm font-semibold text-surface-700 mb-4">
-                Informasi Sistem
-            </h3>
-            <div class="space-y-3">
-                <div class="flex items-center justify-between text-sm">
-                    <span class="text-surface-500">Platform</span>
-                    <span class="font-medium text-surface-700"
-                        >Astro + Turso Edge</span
-                    >
-                </div>
-                <div class="flex items-center justify-between text-sm">
-                    <span class="text-surface-500">Database</span>
-                    <span class="font-medium text-success">● Connected</span>
-                </div>
-                <div class="flex items-center justify-between text-sm">
-                    <span class="text-surface-500">Hosting</span>
-                    <span class="font-medium text-surface-700"
-                        >Cloudflare Edge</span
-                    >
-                </div>
-                <div class="flex items-center justify-between text-sm">
-                    <span class="text-surface-500">Versi</span>
-                    <span class="font-medium text-surface-700">2.0.0</span>
+        <!-- Side Panel Detail Ujian -->
+        <div
+            class="w-full bg-surface-50 p-6 flex flex-col rounded-b-xl md:rounded-r-xl border-t md:border-t-0 md:border-l border-surface-200"
+        >
+            <h4
+                class="font-bold text-surface-800 text-sm mb-1"
+                id="selected-date-title"
+            >
+                Detail Agenda
+            </h4>
+            <p
+                class="text-[11px] text-surface-500 mb-4 font-medium"
+                id="selected-date-subtitle"
+            >
+                Klik kalender untuk melihat kegiatan.
+            </p>
+
+            <div id="event-list" class="flex-1 overflow-y-auto space-y-3">
+                <div class="text-center py-6 text-surface-400 text-xs italic">
+                    Belum ada tanggal dipilih.
                 </div>
             </div>
         </div>
     </div>
 </AdminLayout>
+
+<script is:inline>
+    document.addEventListener("DOMContentLoaded", () => {
+        const calendarGrid = document.getElementById("calendar-grid");
+        const monthLabel = document.getElementById("current-month-label");
+        const widgetContainer = document.getElementById("calendar-widget");
+        const rawEvents = widgetContainer
+            ? widgetContainer.getAttribute("data-events")
+            : "[]";
+        const events = JSON.parse(rawEvents);
+
+        const selectedTitle = document.getElementById("selected-date-title");
+        const selectedSubtitle = document.getElementById(
+            "selected-date-subtitle",
+        );
+        const eventList = document.getElementById("event-list");
+
+        let currentDate = new Date();
+        let selectedDateInfo = new Date(); // default selects today
+        selectedDateInfo.setHours(0, 0, 0, 0);
+
+        function drawEventDetail() {
+            if (!selectedDateInfo) {
+                eventList.innerHTML =
+                    '<div class="text-center py-6 text-surface-400 text-xs italic">Belum ada tanggal dipilih.</div>';
+                return;
+            }
+
+            const formatter = new Intl.DateTimeFormat("id-ID", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+            });
+            selectedTitle.textContent = "Agenda Ujian";
+            selectedSubtitle.textContent = formatter.format(selectedDateInfo);
+
+            // Cari event yang overlapping dengan tanggal ini
+            const dateStart = new Date(selectedDateInfo);
+            dateStart.setHours(0, 0, 0, 0);
+            const dateEnd = new Date(selectedDateInfo);
+            dateEnd.setHours(23, 59, 59, 999);
+
+            const dayEvents = events.filter((e) => {
+                const s = new Date(e.start);
+                return s >= dateStart && s <= dateEnd;
+            });
+
+            if (dayEvents.length === 0) {
+                eventList.innerHTML =
+                    '<div class="text-center py-8 text-surface-400 text-[11px] italic bg-white rounded-lg border border-dashed border-surface-200 mt-2">Tidak ada jadwal tercatat pada hari ini.</div>';
+                return;
+            }
+
+            let html = "";
+            dayEvents.forEach((e) => {
+                const sObj = new Date(e.start);
+                const eObj = new Date(e.end);
+                const timeFmt = new Intl.DateTimeFormat("id-ID", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                });
+                const timeStr =
+                    timeFmt.format(sObj) + " - " + timeFmt.format(eObj);
+
+                // Cek status khusus event ini
+                const now = new Date();
+                let statusBadge = "";
+                if (eObj < now) {
+                    statusBadge =
+                        '<span class="text-[9px] px-1.5 py-0.5 rounded bg-surface-200 text-surface-600 font-bold uppercase tracking-wider whitespace-nowrap">Selesai</span>';
+                } else if (sObj <= now && eObj >= now) {
+                    statusBadge =
+                        '<span class="text-[9px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-700 font-bold uppercase tracking-wider whitespace-nowrap">Berlangsung</span>';
+                } else {
+                    statusBadge =
+                        '<span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold uppercase tracking-wider whitespace-nowrap">Dijadwalkan</span>';
+                }
+
+                html += `
+                    <div class="bg-white border text-left border-surface-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                        <div class="flex justify-between items-start mb-1 gap-3">
+                            <h5 class="font-bold text-xs text-surface-800 line-clamp-2 leading-snug">${e.title}</h5>
+                            ${statusBadge}
+                        </div>
+                        <div class="flex items-center text-[10px] text-surface-500 gap-1.5 mt-2 font-medium">
+                            <i class="icon-clock w-3.5 h-3.5 opacity-70"></i> ${timeStr} WIB
+                        </div>
+                    </div>
+                `;
+            });
+            eventList.innerHTML = html;
+        }
+
+        function renderCalendar() {
+            if (!calendarGrid || !monthLabel) return;
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            monthLabel.textContent = new Intl.DateTimeFormat("id-ID", {
+                month: "long",
+                year: "numeric",
+            }).format(currentDate);
+            calendarGrid.innerHTML = "";
+
+            const firstDayIndex = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            for (let i = 0; firstDayIndex > i; i++) {
+                calendarGrid.innerHTML += `<div class="py-2"></div>`;
+            }
+            for (let i = 1; daysInMonth >= i; i++) {
+                const cellDate = new Date(year, month, i);
+                cellDate.setHours(0, 0, 0, 0);
+
+                const cellEnd = new Date(year, month, i, 23, 59, 59);
+                const dayEvents = events.filter((e) => {
+                    const s = new Date(e.start);
+                    return s >= cellDate && s <= cellEnd;
+                });
+
+                let baseClass =
+                    "py-2 border border-surface-200 rounded text-center text-[11px] font-bold cursor-pointer transition-all hover:scale-105 active:scale-95";
+                let colorClass =
+                    "bg-white text-surface-700 hover:bg-surface-50 border-transparent hover:border-surface-300";
+
+                if (dayEvents.length > 0) {
+                    const now = new Date();
+                    const hasOngoing = dayEvents.some(
+                        (e) =>
+                            new Date(e.start) <= now && new Date(e.end) >= now,
+                    );
+                    const hasUpcoming = dayEvents.some(
+                        (e) => new Date(e.start) > now,
+                    );
+
+                    if (hasOngoing) {
+                        // Sedang berlangsung
+                        colorClass =
+                            "bg-teal-50 border-teal-500 text-teal-800 shadow-sm border-b-[3px]";
+                    } else if (hasUpcoming) {
+                        // Akan datang
+                        colorClass =
+                            "bg-amber-50 border-amber-400 text-amber-800 shadow-sm border-b-[3px]";
+                    } else {
+                        // Selesai
+                        colorClass =
+                            "bg-surface-100 border-surface-200 text-surface-500 border-b-[3px]";
+                    }
+                }
+
+                if (
+                    today.getTime() === cellDate.getTime() &&
+                    dayEvents.length === 0
+                ) {
+                    // Kalau hari ini dan tidak ada event, bedakan batas atasnya
+                    colorClass =
+                        "bg-surface-50 text-surface-900 border-t-[3px] border-surface-400 shadow-sm";
+                }
+
+                // Selected border override
+                if (
+                    selectedDateInfo &&
+                    selectedDateInfo.getTime() === cellDate.getTime()
+                ) {
+                    colorClass +=
+                        " ring-2 ring-primary-500 ring-offset-2 ring-offset-white";
+                }
+
+                const div = document.createElement("div");
+                div.className = `${baseClass} ${colorClass}`;
+                div.textContent = i;
+                div.onclick = function () {
+                    selectedDateInfo = new Date(year, month, i);
+                    renderCalendar(); // Re-render untuk me-refresh status 'ring/selected'
+                    drawEventDetail();
+                };
+
+                calendarGrid.appendChild(div);
+            }
+        }
+
+        renderCalendar();
+        drawEventDetail();
+
+        document.getElementById("prev-month")?.addEventListener("click", () => {
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            renderCalendar();
+        });
+        document.getElementById("next-month")?.addEventListener("click", () => {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            renderCalendar();
+        });
+    });
+</script>

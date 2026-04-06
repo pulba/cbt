@@ -1,0 +1,272 @@
+---
+import StudentLayout from "../../../../layouts/StudentLayout.astro";
+import { db } from "../../../../db";
+import {
+    tests,
+    testTopicSets,
+    testUsers,
+    users,
+    userGroups,
+} from "../../../../db/schema";
+import { eq, and, sum, min, max, count, sql, desc } from "drizzle-orm";
+
+const { id } = Astro.params;
+const sessionUser = Astro.locals.user;
+
+if (!id || !sessionUser || sessionUser.role !== "student") {
+    return Astro.redirect("/siswa/tka");
+}
+
+const testId = parseInt(id);
+
+// Fetch test data
+const testData = await db.select().from(tests).where(eq(tests.id, testId)).get();
+if (!testData || testData.mode !== 'tka') {
+    return Astro.redirect("/siswa/tka");
+}
+
+// Fetch student profile
+const userProfile = await db
+    .select({
+        firstName: users.firstName,
+        username: users.username,
+        groupName: userGroups.name,
+    })
+    .from(users)
+    .leftJoin(userGroups, eq(users.groupId, userGroups.id))
+    .where(eq(users.id, sessionUser.id))
+    .get();
+
+// Fetch timing & topic info
+const timing = await db
+    .select({
+        durationMinutes: sum(testTopicSets.durationMinutes),
+        beginTime: min(testTopicSets.beginTime),
+        endTime: max(testTopicSets.endTime),
+        topicCount: count(testTopicSets.id),
+    })
+    .from(testTopicSets)
+    .where(eq(testTopicSets.testId, testId))
+    .get();
+
+// Check for existing active session
+const existingSession = await db
+    .select()
+    .from(testUsers)
+    .where(and(eq(testUsers.testId, testId), eq(testUsers.userId, sessionUser.id), sql`${testUsers.status} != 5`))
+    .orderBy(desc(testUsers.id))
+    .get();
+
+const isResume = !!existingSession && existingSession.status === 1;
+const isFinished = existingSession?.status === 4;
+const isLocked = existingSession?.status === 10;
+
+if (isLocked) return Astro.redirect("/siswa/tka?error=violation_lock");
+if (isFinished) return Astro.redirect("/siswa/tka?msg=finished");
+
+// Token passed via query param after modal verification
+const tokenParam = Astro.url.searchParams.get("token") || "";
+const wasAutoReset = Astro.url.searchParams.get("autoReset") === "1";
+
+const durationMinutes = Number(timing?.durationMinutes ?? 60);
+const totalTopics = Number(timing?.topicCount ?? 0);
+
+const formatDuration = (min: number) => {
+    if (min >= 60) {
+        const h = Math.floor(min / 60);
+        const m = min % 60;
+        return m > 0 ? `${h} jam ${m} menit` : `${h} jam`;
+    }
+    return `${min} menit`;
+};
+
+const questionTypesList = ['Campuran'];
+---
+
+<StudentLayout title={`Konfirmasi - ${testData.name}`}>
+    <div class="min-h-[calc(100vh-8rem)] flex items-center justify-center px-4">
+        <div class="w-full max-w-xl">
+
+            <!-- Header -->
+            <div class="text-center mb-8">
+                
+                <h1 class="text-2xl font-extrabold text-surface-800 tracking-tight">Konfirmasi Ujian TKA</h1>
+                <p class="text-surface-400 text-sm mt-1">Periksa kembali data sebelum memulai tes akademik terpadu</p>
+            </div>
+
+            <!-- Card -->
+            <div class="bg-white rounded-2xl border border-surface-200 shadow-xl overflow-hidden">
+
+                <!-- Card Top Accent -->
+                <div class="h-1.5 bg-gradient-to-r from-primary-500 via-indigo-500 to-primary-600"></div>
+
+                <!-- Student Info -->
+                <div class="bg-primary-600 px-6 py-5 text-white">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
+                            <i class="icon-user w-6 h-6 text-white text-center flex items-center justify-center"></i>
+                        </div>
+                        <div>
+                            <div class="text-xs text-primary-200 uppercase tracking-wider font-medium">Peserta</div>
+                            <div class="text-lg font-extrabold leading-tight">{userProfile?.firstName || sessionUser.username}</div>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <span class="text-xs text-primary-200 font-mono tracking-widest">{userProfile?.username}</span>
+                                {userProfile?.groupName && (
+                                    <span class="text-primary-300">·</span>
+                                    <span class="text-xs text-primary-200">Kelas {userProfile?.groupName}</span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Info Grid -->
+                <div class="divide-y divide-surface-100">
+                    <!-- Nama Ujian -->
+                    <div class="px-6 py-4 flex items-start justify-between gap-4">
+                        <div class="flex items-center gap-2.5 text-sm text-surface-500 shrink-0">
+                            <div class="w-7 h-7 rounded-lg bg-surface-50 border border-surface-200 flex items-center justify-center">
+                                <i class="icon-file-text w-3.5 h-3.5 text-surface-400"></i>
+                            </div>
+                            Nama Tes
+                        </div>
+                        <div class="text-sm font-bold text-surface-800 text-right">{testData.name}</div>
+                    </div>
+
+                    <!-- Deskripsi -->
+                    {testData.detail && (
+                        <div class="px-6 py-4 flex items-start justify-between gap-4">
+                            <div class="flex items-center gap-2.5 text-sm text-surface-500 shrink-0">
+                                <div class="w-7 h-7 rounded-lg bg-surface-50 border border-surface-200 flex items-center justify-center">
+                                    <i class="icon-info w-3.5 h-3.5 text-surface-400"></i>
+                                </div>
+                                Deskripsi
+                            </div>
+                            <div class="text-sm text-surface-600 text-right max-w-xs" set:html={testData.detail} />
+                        </div>
+                    )}
+
+                    <!-- Jenis Soal -->
+                    <div class="px-6 py-4 flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-2.5 text-sm text-surface-500 shrink-0">
+                            <div class="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                                <i class="icon-layers w-3.5 h-3.5 text-emerald-500"></i>
+                            </div>
+                            Tipe Soal
+                        </div>
+                        <div class="text-xs font-bold text-surface-800 text-right leading-relaxed flex flex-wrap justify-end gap-1.5">
+                            {questionTypesList.length > 0 ? questionTypesList.map(t => (
+                                <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md">{t}</span>
+                            )) : <span class="bg-surface-100 text-surface-500 border border-surface-200 px-2.5 py-1 rounded-md">Belum diatur</span>}
+                        </div>
+                    </div>
+
+                    <!-- Durasi -->
+                    <div class="px-6 py-4 flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-2.5 text-sm text-surface-500">
+                            <div class="w-7 h-7 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center">
+                                <i class="icon-clock w-3.5 h-3.5 text-amber-500"></i>
+                            </div>
+                            Waktu Pengerjaan
+                        </div>
+                        <div class="flex flex-col md:flex-row items-center gap-2">
+                            <span class="text-sm font-bold text-surface-800">{formatDuration(durationMinutes)}</span>
+                            <span class="text-xs text-surface-400 font-mono">({durationMinutes} mnt)</span>
+                        </div>
+                    </div>
+
+
+
+                    <!-- Token notice -->
+                    {tokenParam && (
+                        <div class="px-6 py-4 flex items-center justify-between gap-4">
+                            <div class="flex items-center gap-2.5 text-sm text-surface-500">
+                                <div class="w-7 h-7 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center">
+                                    <i class="icon-key w-3.5 h-3.5 text-amber-500"></i>
+                                </div>
+                                Token
+                            </div>
+                            <span class="font-mono text-xs font-bold tracking-widest bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1 rounded-lg uppercase">{tokenParam}</span>
+                        </div>
+                    )}
+                </div>
+
+                <!-- Auto-reset notice -->
+                {wasAutoReset && (
+                    <div class="mx-6 mb-4 flex items-start gap-3 p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+                        <i class="icon-refresh-cw w-4 h-4 shrink-0 mt-0.5 text-blue-500"></i>
+                        <div>
+                            <div class="font-bold text-blue-800">Sesi Lama Direset Otomatis</div>
+                            <div class="text-xs text-blue-600 mt-0.5">Data sesi sebelumnya tidak valid dan telah dibersihkan. Klik <strong>Mulai</strong> untuk memulai ujian dengan soal yang benar.</div>
+                        </div>
+                    </div>
+                )}
+
+                <!-- Resume notice -->
+                {isResume && !wasAutoReset && (
+                    <div class="mx-6 mb-4 flex items-start gap-3 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                        <i class="icon-alert-triangle w-4 h-4 shrink-0 mt-0.5"></i>
+                        <div>
+                            <div class="font-bold text-amber-800">Sesi Berlanjut</div>
+                            <div class="text-xs text-amber-600 mt-0.5">Anda sudah memulai ujian ini sebelumnya. Jawaban yang sudah diisi tetap tersimpan.</div>
+                        </div>
+                    </div>
+                )}
+
+
+
+                <!-- Action Buttons -->
+                <div class="px-6 pb-6 flex flex-col md:flex-row gap-3">
+                    <a
+                        href="/siswa/tka"
+                        class="flex-1 py-3 px-4 bg-surface-100 hover:bg-surface-200 text-surface-600 text-sm font-bold rounded-xl transition border border-surface-200 text-center"
+                    >
+                        Kembali
+                    </a>
+                    <button
+                        id="start-btn"
+                        onclick={`startExamNow(${testId}, '${tokenParam}')`}
+                        class="flex-2 flex-grow py-3 px-6 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white text-sm font-bold rounded-xl transition shadow-lg shadow-primary-600/20 flex items-center justify-center gap-2"
+                    >
+                        <i class="icon-play w-4 h-4"></i>
+                        {isResume ? "Lanjutkan Ujian" : "Mulai Ujian Sekarang"}
+                    </button>
+                </div>
+            </div>
+
+            
+        </div>
+    </div>
+</StudentLayout>
+
+<script>
+    (window as any).startExamNow = async (testId: number, token: string) => {
+        const btn = document.getElementById("start-btn") as HTMLButtonElement;
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<svg class="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Memulai...`;
+        }
+
+        try {
+            const res = await fetch("/api/peserta/generate-soal", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ testId, token: token || null }),
+            });
+            const data = await res.json();
+
+            if (data.status === 1) {
+                window.location.href = `/siswa/tka/kerjakan/${testId}`;
+            } else {
+                alert(data.message || "Gagal memulai ujian.");
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = `<i class="icon-play w-4 h-4"></i> Mulai Ujian Sekarang`;
+                }
+            }
+        } catch (e) {
+            alert("Terjadi kesalahan jaringan.");
+            if (btn) { btn.disabled = false; btn.innerHTML = `<i class="icon-play w-4 h-4"></i> Mulai Ujian Sekarang`; }
+        }
+    };
+</script>

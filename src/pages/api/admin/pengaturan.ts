@@ -15,6 +15,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         // Settings we allow to update
         const allowedKeys = [
             'school_name', 
+            'school_logo',
             'cbt_nama', 
             'cbt_mobile_lock_xambro', 
             'proteksi_multilogin', 

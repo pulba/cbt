@@ -1,11 +1,29 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import { db } from '../../../db';
-import { tests, testUsers, users } from '../../../db/schema';
+import { tests, testUsers, users, userGroups } from '../../../db/schema';
 import { eq, desc } from 'drizzle-orm';
 
 // Fetch active tests
 const activeTests = await db.select().from(tests).orderBy(desc(tests.id));
+
+// Fetch ALL blocked users across ALL tests
+const allBlockedUsers = await db
+    .select({
+        id: testUsers.id,
+        testId: testUsers.testId,
+        testName: tests.name,
+        username: users.username,
+        name: users.firstName,
+        className: userGroups.name,
+        violationCount: testUsers.violationCount,
+        startTime: testUsers.creationTime,
+    })
+    .from(testUsers)
+    .innerJoin(users, eq(testUsers.userId, users.id))
+    .leftJoin(userGroups, eq(users.groupId, userGroups.id))
+    .innerJoin(tests, eq(testUsers.testId, tests.id))
+    .where(eq(testUsers.status, 10));
 
 // If a test is selected via query param
 const selectedTestId = Astro.url.searchParams.get('testId');
@@ -69,6 +87,55 @@ if (selectedTestId) {
             </div>
         )}
     </div>
+
+    {allBlockedUsers.length > 0 && (
+        <div class="bg-rose-50 rounded-xl border border-rose-200 shadow-sm overflow-hidden flex flex-col mb-6 animate-pulse">
+            <div class="p-4 border-b border-rose-200 bg-rose-100/50 flex justify-between items-center">
+                <h3 class="text-sm font-semibold text-rose-800 flex items-center gap-2">
+                    <i class="icon-lock w-4 h-4"></i>
+                    Peserta Terblokir Sistem ({allBlockedUsers.length} orang)
+                </h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-surface-700">
+                    <thead class="bg-rose-100/30 border-b border-rose-200 text-rose-800 font-semibold">
+                        <tr>
+                            <th class="px-4 py-3 w-12 text-center">No</th>
+                            <th class="px-4 py-3">Nama / Kelas</th>
+                            <th class="px-4 py-3">Ujian</th>
+                            <th class="px-4 py-3 text-center">Pelanggaran</th>
+                            <th class="px-4 py-3 text-center">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-rose-100/50">
+                        {allBlockedUsers.map((b, i) => (
+                            <tr class="hover:bg-rose-100/30 transition-colors">
+                                <td class="px-4 py-4 text-center text-rose-400 text-xs">{i+1}</td>
+                                <td class="px-4 py-4">
+                                    <div class="font-bold text-surface-800">{b.name || b.username}</div>
+                                    <div class="text-[11px] font-medium text-surface-500 mt-0.5">{b.className || 'Umum'}</div>
+                                </td>
+                                <td class="px-4 py-4 text-xs font-semibold text-surface-600">{b.testName}</td>
+                                <td class="px-4 py-4 text-center">
+                                    <span class="px-2 py-1 bg-rose-600 text-white rounded-md text-[10px] font-bold shadow-sm">
+                                        {b.violationCount}x KELUAR
+                                    </span>
+                                </td>
+                                <td class="px-4 py-4 text-center">
+                                    <button 
+                                        onclick={`handleAction('unlock', ${b.id}, '${b.username}')`}
+                                        class="px-3 py-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-md text-xs font-bold transition flex justify-center items-center gap-1 mx-auto border border-emerald-200 shadow-sm"
+                                    >
+                                        <i class="icon-unlock w-3 h-3"></i> Buka Blokir
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    )}
 
     {selectedTestId ? (
         <div class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden flex flex-col">

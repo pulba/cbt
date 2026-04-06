@@ -108,13 +108,13 @@ const activeCount = allTests.filter((t) => t.isActive).length;
                                 </td>
                             </tr>
                         ) : (
-                            allTests.map((test) => {
+                            allTests.map((test, index) => {
                                 const isActive = test.participantCount > 0;
                 
                                 return (
                                     <tr class="hover:bg-surface-50/50 transition-colors group" data-name={test.name.toLowerCase()}>
                                         <td class="px-5 py-4 text-center text-surface-400 font-mono text-xs">
-                                            {test.id}
+                                            {index + 1}
                                         </td>
                                         <td class="px-5 py-4">
                                             <div class="flex items-start gap-3">

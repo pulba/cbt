@@ -90,13 +90,109 @@ const allTopics = await db.select().from(topics).all();
                                 >-- Pilih Mata Pelajaran / Topik --</option
                             >
                             {
-                                allTopics.map((topic) => (
+                                allTopics.map((topic: any) => (
                                     <option value={topic.id}>
                                         {topic.name}
                                     </option>
                                 ))
                             }
                         </select>
+                    </div>
+
+                    <!-- Jenis Soal Selector -->
+                    <div>
+                        <label class="block text-sm font-medium text-surface-700 mb-1.5">
+                            Jenis Soal <span class="text-danger">*</span>
+                        </label>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 mb-6" id="type-selector">
+                            <label class="type-option cursor-pointer">
+                                <input type="radio" name="questionType" value="1" checked class="sr-only" />
+                                <div class="type-card p-3 rounded-xl border-2 border-primary-500 bg-primary-50 text-center transition-all h-full flex flex-col items-center justify-center" data-type="1">
+                                    <i class="icon-list w-6 h-6 mb-1.5 text-primary-600"></i>
+                                    <p class="text-xs font-bold text-primary-700">Pilihan Ganda</p>
+                                    <p class="text-[10px] text-primary-500 mt-0.5">Format A/B/C/D/E</p>
+                                </div>
+                            </label>
+                            <label class="type-option cursor-pointer">
+                                <input type="radio" name="questionType" value="2" class="sr-only" />
+                                <div class="type-card p-3 rounded-xl border-2 border-surface-200 bg-white text-center transition-all h-full flex flex-col items-center justify-center" data-type="2">
+                                    <i class="icon-edit-3 w-6 h-6 mb-1.5 text-surface-400"></i>
+                                    <p class="text-xs font-bold text-surface-600">Esai</p>
+                                    <p class="text-[10px] text-surface-400 mt-0.5">Jawaban panjang</p>
+                                </div>
+                            </label>
+                            <label class="type-option cursor-pointer">
+                                <input type="radio" name="questionType" value="3" class="sr-only" />
+                                <div class="type-card p-3 rounded-xl border-2 border-surface-200 bg-white text-center transition-all h-full flex flex-col items-center justify-center" data-type="3">
+                                    <i class="icon-pen-tool w-6 h-6 mb-1.5 text-surface-400"></i>
+                                    <p class="text-xs font-bold text-surface-600">Jawaban Singkat</p>
+                                    <p class="text-[10px] text-surface-400 mt-0.5">Satu baris/kata</p>
+                                </div>
+                            </label>
+                            <label class="type-option cursor-pointer">
+                                <input type="radio" name="questionType" value="4" class="sr-only" />
+                                <div class="type-card p-3 rounded-xl border-2 border-surface-200 bg-white text-center transition-all h-full flex flex-col items-center justify-center" data-type="4">
+                                    <i class="icon-link w-6 h-6 mb-1.5 text-surface-400"></i>
+                                    <p class="text-xs font-bold text-surface-600">Menjodohkan</p>
+                                    <p class="text-[10px] text-surface-400 mt-0.5">Pasangan Kiri-Kanan</p>
+                                </div>
+                            </label>
+                            <label class="type-option cursor-pointer">
+                                <input type="radio" name="questionType" value="5" class="sr-only" />
+                                <div class="type-card p-3 rounded-xl border-2 border-surface-200 bg-white text-center transition-all h-full flex flex-col items-center justify-center" data-type="5">
+                                    <i class="icon-check-square w-6 h-6 mb-1.5 text-surface-400"></i>
+                                    <p class="text-xs font-bold text-surface-600">Ceklis</p>
+                                    <p class="text-[10px] text-surface-400 mt-0.5">Banyak Jawaban Benar</p>
+                                </div>
+                            </label>
+                            <label class="type-option cursor-pointer">
+                                <input type="radio" name="questionType" value="6" class="sr-only" />
+                                <div class="type-card p-3 rounded-xl border-2 border-surface-200 bg-white text-center transition-all h-full flex flex-col items-center justify-center" data-type="6">
+                                    <i class="icon-toggle-right w-6 h-6 mb-1.5 text-surface-400"></i>
+                                    <p class="text-xs font-bold text-surface-600">Benar/Salah</p>
+                                    <p class="text-[10px] text-surface-400 mt-0.5">Format Pernyataan</p>
+                                </div>
+                            </label>
+                            <label class="type-option cursor-pointer">
+                                <input type="radio" name="questionType" value="7" class="sr-only" />
+                                <div class="type-card p-3 rounded-xl border-2 border-surface-200 bg-white text-center transition-all h-full flex flex-col items-center justify-center border-indigo-200 bg-indigo-50" data-type="7">
+                                    <i class="icon-layers w-6 h-6 mb-1.5 text-indigo-500"></i>
+                                    <p class="text-xs font-bold text-indigo-700">TKA / Campur</p>
+                                    <p class="text-[10px] text-indigo-500 mt-0.5">Berisi 6 Format TKA</p>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Essay Config (shows when type 2 or 3) -->
+                    <div id="essay-config-section" class="hidden bg-indigo-50 border border-indigo-200 rounded-xl p-5 space-y-4">
+                        <div class="flex items-center gap-2 mb-1">
+                            <i class="icon-settings w-4 h-4 text-indigo-500"></i>
+                            <h4 class="text-sm font-bold text-indigo-800">Konfigurasi Penilaian Esai</h4>
+                        </div>
+                        <p class="text-xs text-indigo-600 -mt-2">Konfigurasi ini akan diterapkan ke <strong>semua</strong> soal esai yang diimport dari file ini.</p>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label for="gradingMode" class="block text-xs font-semibold text-indigo-800 mb-1.5">Mode Penilaian</label>
+                                <select id="gradingMode" name="gradingMode"
+                                    class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm focus:ring-indigo-400/30 focus:border-indigo-400">
+                                    <option value="manual">Manual — Guru koreksi langsung</option>
+                                    <option value="keyword">Keyword — Otomatis (kata kunci)</option>
+                                    <option value="hybrid">Hybrid — Keyword + kemiripan teks</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="essayMaxScore" class="block text-xs font-semibold text-indigo-800 mb-1.5">Skor Maks per Soal</label>
+                                <input type="number" id="essayMaxScore" name="essayMaxScore" value="100" min="1" max="1000"
+                                    class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm focus:ring-indigo-400/30 focus:border-indigo-400" />
+                            </div>
+                        </div>
+
+                        <p class="text-[11px] text-indigo-500">
+                            <i class="icon-info w-3 h-3 inline-block mr-1"></i>
+                            Kata kunci spesifik dapat ditambahkan nanti per-soal via menu <strong>Edit Soal</strong> setelah import.
+                        </p>
                     </div>
 
                     <div>
@@ -157,7 +253,7 @@ const allTopics = await db.select().from(topics).all();
                             class="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center shadow-md shadow-primary-500/20 w-full sm:w-auto justify-center"
                         >
                             <i class="icon-play w-4 h-4 mr-2"></i> Mulai Ekstraksi
-                            & Import
+                            &amp; Import
                         </button>
                     </div>
                 </form>
@@ -169,70 +265,120 @@ const allTopics = await db.select().from(topics).all();
             <div
                 class="bg-primary-50 rounded-xl border border-primary-100 p-5 shadow-sm text-primary-900"
             >
-                <h4 class="font-bold flex items-center mb-3">
-                    <i class="icon-info w-5 h-5 mr-2 text-primary-600"></i>
-                    Panduan Smart Import
-                </h4>
+                <div class="flex items-center gap-4 mb-3 border-b border-primary-200/50 pb-2">
+                     <div class="font-bold flex items-center text-primary-700 border-b-2 border-primary-600 pb-2 -mb-[9px]">
+                        <i class="icon-file-text w-4 h-4 mr-2"></i> Format File
+                     </div>
+                </div>
 
-                <div
-                    class="space-y-4 text-sm leading-relaxed text-primary-800/80"
-                >
-                    <div>
+                <!-- TAB 1: FORMAT FILE -->
+                <div id="tab-format" class="tab-content space-y-4 text-sm leading-relaxed text-primary-800/80">
+                    <div id="format-pg">
                         <strong
                             class="font-semibold text-primary-900 block mb-1"
-                            >A. Format Excel (.xlsx)</strong
+                            >Format Word / PDF — Pilihan Ganda</strong
                         >
-                        Gunakan format tabel vertikal dengan 4 kolom (No | Jenis |
-                        Isi | Jawaban):<br />
-                        <ul
-                            class="list-disc list-inside mt-1 text-xs text-primary-800/80 space-y-0.5"
-                        >
-                            <li>
-                                <strong>Jenis:</strong> Isi dengan "SOAL" atau "JAWABAN"
-                                (ke bawah berurutan).
-                            </li>
-                            <li>
-                                <strong>Isi:</strong> Teks pertanyaan atau teks opsi
-                                jawaban.
-                            </li>
-                            <li>
-                                <strong>Jawaban:</strong> Isi angka <code
-                                    class="bg-white px-1 rounded font-mono font-bold"
-                                    >1</code
-                                > untuk opsi yang benar, dan <code
-                                    class="bg-white px-1 rounded font-mono font-bold"
-                                    >0</code
-                                > untuk yang salah. Kosongkan untuk baris SOAL.
-                            </li>
-                        </ul>
-                    </div>
-
-                    <div>
-                        <strong
-                            class="font-semibold text-primary-900 block mb-1"
-                            >B. Format Word (.docx) / PDF</strong
-                        >
-                        Gunakan nomor (1., 2.) untuk Soal dan Huruf (A., B.) untuk
-                        opsi. Contoh:<br />
+                        Gunakan nomor (1., 2.) untuk Soal dan Huruf kapital (A., B., C., D., E.) untuk
+                        opsi jawaban. Akhiri soal dengan Kunci Jawaban.<br />
                         <div
-                            class="bg-white p-2.5 rounded-lg mt-1 border border-primary-200 font-mono text-xs opacity-90"
+                            class="bg-white p-3 rounded-lg mt-2 border border-primary-200 font-mono text-xs opacity-90 text-surface-700"
                         >
                             1. Siapakah presiden pertama Indonesia?<br />
                             A. Ir. Soekarno<br />
                             B. B.J. Habibie<br />
-                            Kunci: A
+                            C. Joko Widodo<br />
+                            D. Megawati Soekarnoputri<br />
+                            E. Susilo Bambang Yudhoyono<br />
+                            Kunci Jawaban: A
+                        </div>
+                    </div>
+
+                    <div id="format-essay" class="hidden">
+                        <strong class="font-semibold text-primary-900 block mb-1">Format Word / PDF — Esai / Jawaban Singkat</strong>
+                        Cukup tulis nomor dan teks soal. Tidak perlu opsi A/B/C/D. Satu baris = satu soal (atau paragraf terpisah).<br />
+                        <div class="bg-white p-3 rounded-lg mt-2 border border-primary-200 font-mono text-xs opacity-90 text-surface-700">
+                            1. Jelaskan proses fotosintesis dan faktor yang mempengaruhinya!<br /><br />
+                            2. Apa yang dimaksud dengan ekosistem?<br /><br />
+                            3. Sebutkan tiga fungsi utama hutan hujan tropis!
+                        </div>
+                        <div class="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-[11px]">
+                            <i class="icon-alert-triangle w-3.5 h-3.5 inline-block mr-1"></i>
+                            Untuk soal esai, sistem hanya mengekstrak teks pertanyaan. Kata kunci penilaian dapat ditambahkan per-soal setelah import.
+                        </div>
+                    </div>
+
+                    <div id="format-matching" class="hidden">
+                        <strong class="font-semibold text-primary-900 block mb-1">Format Word / PDF — Menjodohkan</strong>
+                        Tulis nomor soal lalu setiap pasangan diawali dengan <code class="bg-white px-1 border border-primary-200 rounded text-[11px]">PASANGAN:</code> diikuti format <code class="bg-white px-1 border border-primary-200 rounded text-[11px]">Kiri = Kanan = Bobot</code>.<br />
+                        <div class="bg-white p-3 rounded-lg mt-2 border border-primary-200 font-mono text-xs opacity-90 text-surface-700">
+                            1. Pasangkan nama ibukota negara berikut:<br />
+                            PASANGAN: Ibukota Indonesia = Jakarta = 10<br />
+                            PASANGAN: 2 + 2 = 4 = 10<br />
+                            PASANGAN: Planet terbesar = Jupiter = 10<br /><br />
+                            2. Jodohkan unsur kimia dengan simbolnya:<br />
+                            PASANGAN: Emas = Au = 10<br />
+                            PASANGAN: Besi = Fe = 10
+                        </div>
+                        <div class="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-[11px]">
+                            <i class="icon-info w-3.5 h-3.5 inline-block mr-1"></i>
+                            Format Excel: Kolom A=No, B=Jenis (SOAL/PASANGAN), C=Isi Kiri, D=Isi Kanan, E=Bobot
+                        </div>
+                    </div>
+
+                    <div id="format-ceklis" class="hidden">
+                        <strong class="font-semibold text-primary-900 block mb-1">Format Word / PDF — Ceklis (Banyak Jawaban)</strong>
+                        Mirip seperti pilihan ganda, namun pada Kunci Jawaban isi dengan lebih dari satu angka koma (Kunci: 1,3,4) atau (Kunci Jawaban: 1, 3, 4).<br />
+                        <div class="bg-white p-3 rounded-lg mt-2 border border-primary-200 font-mono text-xs opacity-90 text-surface-700">
+                            1. Manakah dari hewan berikut yang termasuk mamalia?<br />
+                            1. Sapi<br />
+                            2. Ayam<br />
+                            3. Paus<br />
+                            4. Ular<br />
+                            Kunci Jawaban: 1, 3
+                        </div>
+                        <div class="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-[11px]">
+                            <i class="icon-info w-3.5 h-3.5 inline-block mr-1"></i>
+                            Gunakan angka (1., 2., 3., 4.) untuk opsi jawaban, bukan abjad.
+                        </div>
+                    </div>
+
+                    <div id="format-benarsalah" class="hidden">
+                        <strong class="font-semibold text-primary-900 block mb-1">Format Word / PDF — Benar/Salah</strong>
+                        Cukup tulis nomor, pertanyaan, lalu beri "Kunci Jawaban: Benar" atau "Kunci Jawaban: Salah".<br />
+                        <div class="bg-white p-3 rounded-lg mt-2 border border-primary-200 font-mono text-xs opacity-90 text-surface-700">
+                            1. Ibukota Indonesia adalah Jakarta.<br />
+                            Kunci Jawaban: Benar<br /><br />
+                            2. Matahari mengelilingi Bumi.<br />
+                            Kunci Jawaban: Salah
                         </div>
                     </div>
 
                     <div class="pt-3 border-t border-primary-200/50">
-                        <a
-                            href="/templates/Template_Import_Soal.xlsx"
-                            download
-                            class="text-primary-600 hover:text-primary-700 font-medium text-sm flex items-center underline-offset-4 hover:underline"
-                        >
-                            <i class="icon-download w-4 h-4 mr-1.5"></i> Unduh Template
-                            Excel
-                        </a>
+                        <strong class="font-semibold text-primary-900 block mb-2 text-xs">Unduh Template Kosongan:</strong>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <a
+                                href="/templates/Form Import Soal.docx"
+                                download
+                                class="text-primary-700 font-bold text-xs flex items-center justify-center bg-white hover:bg-primary-100 border border-primary-200 p-2.5 rounded-lg transition-colors shadow-sm"
+                            >
+                                <i class="icon-download w-4 h-4 mr-1.5 text-primary-500"></i> Template Pilihan Ganda
+                            </a>
+                            <a
+                                href="/templates/Template-Soal-Esai.docx"
+                                download
+                                class="text-surface-700 font-bold text-xs flex items-center justify-center bg-white hover:bg-surface-100 border border-surface-200 p-2.5 rounded-lg transition-colors shadow-sm"
+                            >
+                                <i class="icon-file-text w-4 h-4 mr-1.5 text-surface-400"></i> Template Esai
+                            </a>
+                            <a
+                                href="/templates/Template-Soal-Menjodohkan.xlsx"
+                                download
+                                id="template-matching-btn"
+                                class="hidden text-emerald-700 font-bold text-xs flex items-center justify-center bg-white hover:bg-emerald-50 border border-emerald-300 p-2.5 rounded-lg transition-colors shadow-sm"
+                            >
+                                <i class="icon-link w-4 h-4 mr-1.5 text-emerald-500"></i> Template Menjodohkan (.xlsx)
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -255,6 +401,77 @@ const allTopics = await db.select().from(topics).all();
     const successAlert = document.getElementById("success-alert");
     const successMsg = document.getElementById("success-msg");
     const dropZone = document.getElementById("drop-zone");
+    const essayConfigSection = document.getElementById("essay-config-section");
+    const formatPg = document.getElementById("format-pg");
+    const formatEssay = document.getElementById("format-essay");
+    const formatMatching = document.getElementById("format-matching");
+    const formatCeklis = document.getElementById("format-ceklis");
+    const formatBenarSalah = document.getElementById("format-benarsalah");
+    const templateMatchingBtn = document.getElementById("template-matching-btn");
+
+    // ─── Type Selector Logic ───
+    const typeCards = document.querySelectorAll('.type-card');
+    const typeInputs = document.querySelectorAll('input[name="questionType"]');
+
+    function updateTypeUI(selectedVal: string) {
+        typeCards.forEach((card) => {
+            const cardType = card.getAttribute('data-type');
+            const isSelected = cardType === selectedVal;
+            card.classList.toggle('border-primary-500', isSelected && (selectedVal === '1' || selectedVal === '5' || selectedVal === '6'));
+            card.classList.toggle('bg-primary-50', isSelected && (selectedVal === '1' || selectedVal === '5' || selectedVal === '6'));
+            card.querySelector('i')?.classList.toggle('text-primary-600', isSelected && (selectedVal === '1' || selectedVal === '5' || selectedVal === '6'));
+            card.querySelector('i')?.classList.toggle('text-surface-400', !(isSelected && (selectedVal === '1' || selectedVal === '5' || selectedVal === '6')));
+            
+            card.classList.toggle('border-emerald-500', isSelected && selectedVal === '4');
+            card.classList.toggle('bg-emerald-50', isSelected && selectedVal === '4');
+            if (selectedVal === '4') {
+                card.querySelector('i')?.classList.toggle('text-emerald-500', isSelected);
+                card.querySelector('i')?.classList.toggle('text-surface-400', !isSelected);
+            }
+            
+            card.classList.toggle('border-indigo-500', isSelected && (selectedVal === '2' || selectedVal === '3' || selectedVal === '7'));
+            card.classList.toggle('bg-indigo-50', isSelected && (selectedVal === '2' || selectedVal === '3' || selectedVal === '7'));
+            if (selectedVal === '2' || selectedVal === '3' || selectedVal === '7') {
+                card.querySelector('i')?.classList.toggle('text-indigo-500', isSelected);
+                card.querySelector('i')?.classList.toggle('text-surface-400', !isSelected);
+            }
+            
+            card.classList.toggle('border-surface-200', !isSelected);
+            card.classList.toggle('bg-white', !isSelected);
+        });
+
+        const isEssay = selectedVal === '2' || selectedVal === '3';
+        const isMatching = selectedVal === '4';
+        const isCeklis = selectedVal === '5';
+        const isBenarSalah = selectedVal === '6';
+        const isMixed = selectedVal === '7';
+        if (essayConfigSection) {
+            essayConfigSection.classList.toggle('hidden', !isEssay);
+        }
+        // Update format guide
+        if (formatPg) formatPg.classList.toggle('hidden', selectedVal !== '1');
+        if (formatEssay) formatEssay.classList.toggle('hidden', !isEssay);
+        if (formatMatching) formatMatching.classList.toggle('hidden', !isMatching);
+        if (formatCeklis) formatCeklis.classList.toggle('hidden', !isCeklis);
+        if (formatBenarSalah) formatBenarSalah.classList.toggle('hidden', !isBenarSalah);
+        
+        // Show/hide matching template button
+        if (templateMatchingBtn) templateMatchingBtn.classList.toggle('hidden', !isMatching);
+    }
+
+    document.querySelectorAll('.type-option').forEach((label) => {
+        label.addEventListener('click', () => {
+            const input = label.querySelector('input[type="radio"]') as HTMLInputElement;
+            if (input) {
+                input.checked = true;
+                updateTypeUI(input.value);
+            }
+        });
+    });
+
+    // Initialize with PG selected
+    updateTypeUI('1');
+
 
     // Drag and drop handlers
     ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
@@ -332,10 +549,21 @@ const allTopics = await db.select().from(topics).all();
 
         const formData = new FormData(form);
 
+        // Add essay config as JSON if essay type
+        const questionType = (document.querySelector('input[name="questionType"]:checked') as HTMLInputElement)?.value || '1';
+        formData.set('questionType', questionType);
+
+        if (questionType !== '1') {
+            const gradingMode = (document.getElementById('gradingMode') as HTMLSelectElement)?.value || 'manual';
+            const maxScore = (document.getElementById('essayMaxScore') as HTMLInputElement)?.value || '100';
+            formData.set('gradingMode', gradingMode);
+            formData.set('essayMaxScore', maxScore);
+        }
+
         try {
             const res = await fetch("/api/soal/import", {
                 method: "POST",
-                body: formData, // fetch automatically handles the multipart Content-Type
+                body: formData,
             });
 
             const result = await res.json();
@@ -346,8 +574,8 @@ const allTopics = await db.select().from(topics).all();
                     successAlert.classList.remove("hidden");
                 }
                 form.reset();
+                updateTypeUI('1');
                 if (fileNameDisplay) fileNameDisplay.classList.add("hidden");
-                // Optional: redirect to topic view after small delay
                 const topicId = formData.get("topicId");
                 setTimeout(() => {
                     window.location.href = `/admin/soal/daftar/${topicId}`;

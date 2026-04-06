@@ -4,12 +4,25 @@ import {
     tests,
     testUsers,
     testQuestions,
-    testQuestionAnswers,
+    questions,
+    essayConfigs,
     questionAnswers,
     users,
     userGroups,
+    configs,
 } from "../../../db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
+import { testTopicSets } from "../../../db/schema";
+
+// Fetch school name from configs
+import { sql } from 'drizzle-orm';
+const allConfigs = await db.select({ 
+    key: configs.key, 
+    value: sql<string>`CASE WHEN ${configs.key} = 'school_logo' THEN '1' ELSE ${configs.value} END` 
+}).from(configs).all();
+const getConfig = (key: string) =>
+    allConfigs.find((c: any) => c.key === key)?.value || "";
+const schoolName = getConfig("school_name") || "Sekolah";
 
 const admin = Astro.locals.user;
 if (!admin || admin.role === "student") return Astro.redirect("/admin");
@@ -28,6 +41,7 @@ const sessions = await db
     .select({
         sessionId: testUsers.id,
         userId: testUsers.userId,
+        status: testUsers.status,
         creationTime: testUsers.creationTime,
         firstName: users.firstName,
         username: users.username,
@@ -40,48 +54,56 @@ const sessions = await db
     .orderBy(userGroups.name, users.firstName)
     .all();
 
-// 3. Scoring
+// 3. Get all question scores (including essay scores) from DB
 const allSessionQuestions = await db
     .select({
         sessionId: testQuestions.testUserId,
-        qId: testQuestions.id,
+        tqId: testQuestions.id,
+        questionId: questions.id,
+        score: testQuestions.score,
+        essayScoreOverride: testQuestions.essayScoreOverride,
+        isAnswered: testQuestions.isAnswered,
+        qType: questions.type,
+        topicId: questions.topicId,
+        essayMaxScore: essayConfigs.maxScore,
     })
     .from(testQuestions)
     .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
+    .innerJoin(questions, eq(testQuestions.questionId, questions.id))
+    .leftJoin(
+        essayConfigs,
+        eq(testQuestions.questionId, essayConfigs.questionId),
+    )
     .where(eq(testUsers.testId, testId))
     .all();
 
-const allSessionSelected = await db
-    .select({
-        sessionId: testQuestions.testUserId,
-        isCorrect: questionAnswers.isCorrect,
-    })
-    .from(testQuestionAnswers)
-    .innerJoin(
-        testQuestions,
-        eq(testQuestionAnswers.testQuestionId, testQuestions.id),
-    )
-    .innerJoin(testUsers, eq(testQuestions.testUserId, testUsers.id))
-    .innerJoin(
-        questionAnswers,
-        eq(testQuestionAnswers.answerId, questionAnswers.id),
-    )
-    .where(
-        and(
-            eq(testUsers.testId, testId),
-            eq(testQuestionAnswers.isSelected, true),
-        ),
-    )
-    .all();
+const isTkaMode = test.mode === 'tka';
+const tkaTopicSets = isTkaMode ? await db.select().from(testTopicSets).where(eq(testTopicSets.testId, testId)).all() : [];
+
+let parsedTkaScores: any = {};
+if (isTkaMode && test.tkaScoreConfig) {
+    try { parsedTkaScores = JSON.parse(test.tkaScoreConfig); } catch(e) {}
+}
+
+// Fetch Type 5 correct counts for maxRaw
+const type5QuestionIds = [...new Set(allSessionQuestions.filter(q => q.qType === 5).map(q => q.questionId))] as number[];
+const type5Counts = new Map<number, number>();
+if (type5QuestionIds.length > 0) {
+    const t5Answers = await db.select({ questionId: questionAnswers.questionId, isCorrect: questionAnswers.isCorrect })
+        .from(questionAnswers)
+        .where(and(inArray(questionAnswers.questionId, type5QuestionIds), eq(questionAnswers.isCorrect, true)))
+        .all();
+    type5QuestionIds.forEach(qid => {
+        type5Counts.set(qid, Math.max(1, t5Answers.filter(a => a.questionId === qid).length));
+    });
+}
 
 const scoreRight = test.scoreRight ?? 1;
-const scoreWrong = test.scoreWrong ?? 0;
-const scoreUnanswered = test.scoreUnanswered ?? 0;
 const maxScore = test.maxScore ?? 0;
 
 // 3.5 Group by latest session per user
 const latestMap = new Map<number, any>();
-sessions.forEach(sess => {
+sessions.forEach((sess) => {
     const existing = latestMap.get(sess.userId!);
     if (!existing || sess.sessionId > existing.sessionId) {
         latestMap.set(sess.userId!, sess);
@@ -89,32 +111,61 @@ sessions.forEach(sess => {
 });
 const filteredSessList = Array.from(latestMap.values());
 
+// 3.1 Fetch weights for Type 4 questions to calculate max possible raw score
+const type4QuestionIds = [...new Set(allSessionQuestions.filter(q => q.qType === 4 && q.questionId != null).map(q => q.questionId!))] as number[];
+const type4Weights = new Map<number, number>();
+if (type4QuestionIds.length > 0) {
+    const weights = await db.select({ qId: questionAnswers.questionId, weight: questionAnswers.weight })
+        .from(questionAnswers).where(inArray(questionAnswers.questionId, type4QuestionIds)).all();
+    type4QuestionIds.forEach(qid => {
+        const totalW = weights.filter(w => w.qId === qid).reduce((s: number, w: any) => s + (w.weight ?? 1), 0);
+        type4Weights.set(qid, totalW);
+    });
+}
+
 const results = filteredSessList.map((sess, idx) => {
     const sessionQs = allSessionQuestions.filter(
         (q) => q.sessionId === sess.sessionId,
     );
-    const sessionSelected = allSessionSelected.filter(
-        (s) => s.sessionId === sess.sessionId,
-    );
 
     const total = sessionQs.length;
-    const correct = sessionSelected.filter((s) => s.isCorrect).length;
-    const answered = sessionSelected.length;
-    const wrong = answered - correct;
-    const unanswered = total - answered;
-
-    const pgScore =
-        correct * scoreRight +
-        wrong * scoreWrong +
-        unanswered * scoreUnanswered;
+    // Use essayScoreOverride when available (same logic as rekap.astro)
+    const pgScore = sessionQs.reduce((sum: number, q: any) => {
+        if ((q.qType === 2 || q.qType === 3) && q.essayScoreOverride !== null && q.essayScoreOverride !== undefined) {
+            return sum + q.essayScoreOverride;
+        }
+        return sum + (q.score || 0);
+    }, 0);
     const maxScoreScale = maxScore > 0 ? maxScore : 100;
-    const maxRaw = total * scoreRight;
+
+    // Per-question maxRaw: essay uses essayMaxScore, Matching uses total weight, PG uses scoreRight
+    const maxRaw = sessionQs.reduce((sum: number, q: any) => {
+        let qScoreRight = scoreRight;
+        if (isTkaMode) {
+            if (parsedTkaScores[q.qType] !== undefined) {
+                qScoreRight = parseFloat(parsedTkaScores[q.qType]);
+            }
+            const ts = tkaTopicSets.find(t => t.topicId === q.topicId && t.questionType === q.qType);
+            if (ts && ts.scoreRightOverride !== null) qScoreRight = ts.scoreRightOverride;
+            
+            return sum + qScoreRight;
+        }
+        if (q.qType === 2 || q.qType === 3)
+            return sum + (q.essayMaxScore ?? 100);
+        if (q.qType === 4)
+            return sum + (type4Weights.get(q.questionId) ?? 1);
+        if (q.qType === 5)
+            return sum + ((type5Counts.get(q.questionId) ?? 1) * qScoreRight);
+        return sum + qScoreRight;
+    }, 0);
+
     const totalScore = maxRaw > 0 ? (pgScore / maxRaw) * maxScoreScale : 0;
+    const hasEssay = sessionQs.some((q: any) => q.qType === 2 || q.qType === 3);
 
     return {
         ...sess,
-        totalScore,
-        status: (sessions.find(s => s.sessionId === sess.sessionId) as any).status,
+        totalScore: Math.round(totalScore * 100) / 100,
+        hasEssay,
         formattedDate: sess.creationTime
             ? new Date(sess.creationTime)
                   .toISOString()
@@ -256,12 +307,12 @@ const results = filteredSessList.map((sess, idx) => {
 
         <div class="page-container">
             <div class="header">
-                <h1>Laporan Hasil Ujian & Nilai</h1>
-                <p>
-                    Ujian: <strong>{test.name}</strong> | Tanggal Cetak: {
+                <h1>Laporan Nilai Ujian {test.name}</h1>
+                <p style="font-size: 13px; font-weight: bold; margin: 0 0 4px;">
+                    {schoolName} |
+                    {
                         new Date().toLocaleString("id-ID", {
                             dateStyle: "full",
-                            timeStyle: "short",
                         })
                     }
                 </p>
@@ -273,9 +324,8 @@ const results = filteredSessList.map((sess, idx) => {
                         <th style="width: 40px;">No</th>
                         <th>Nama</th>
                         <th style="width: 100px;">Username</th>
+                        <th style="width: 80px;">Kelas</th>
                         <th style="width: 80px;">Status</th>
-                        <th>Nama Tes</th>
-                        <th style="width: 120px;">Group</th>
                         <th style="width: 80px;">Nilai</th>
                     </tr>
                 </thead>
@@ -286,11 +336,14 @@ const results = filteredSessList.map((sess, idx) => {
                                 <td>{idx + 1}</td>
                                 <td class="text-bold">{r.firstName}</td>
                                 <td class="font-mono">{r.username}</td>
-                                <td class="text-center">
-                                    {r.status === 4 ? "Selesai" : r.status === 5 ? "Arsip" : "Aktif"}
-                                </td>
-                                <td>{test.name}</td>
                                 <td>{r.groupName || "-"}</td>
+                                <td>
+                                    {r.status === 4
+                                        ? "Selesai"
+                                        : r.status === 5
+                                          ? "Arsip"
+                                          : "Aktif"}
+                                </td>
                                 <td class="text-bold">
                                     {r.totalScore.toFixed(2).replace(".", ",")}
                                 </td>

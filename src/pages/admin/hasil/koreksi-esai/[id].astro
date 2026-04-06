@@ -1,0 +1,434 @@
+---
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { db } from "../../../../db";
+import {
+    testUsers,
+    testQuestions,
+    questions,
+    essayConfigs,
+    users,
+    userGroups,
+    tests,
+} from "../../../../db/schema";
+import { eq, and } from "drizzle-orm";
+
+const { id } = Astro.params; // sessionId (testUserId)
+const testId = Astro.url.searchParams.get("testId");
+
+if (!id) return Astro.redirect("/admin/hasil/koreksi-esai");
+
+const sessionId = parseInt(id);
+
+// Get session info
+const session = await db
+    .select({
+        sessionId: testUsers.id,
+        status: testUsers.status,
+        testId: testUsers.testId,
+        userId: testUsers.userId,
+        firstName: users.firstName,
+        username: users.username,
+        groupName: userGroups.name,
+    })
+    .from(testUsers)
+    .innerJoin(users, eq(testUsers.userId, users.id!))
+    .leftJoin(userGroups, eq(users.groupId, userGroups.id))
+    .where(eq(testUsers.id, sessionId))
+    .get();
+
+if (!session) return Astro.redirect("/admin/hasil/koreksi-esai");
+
+const testData = await db
+    .select({ id: tests.id, name: tests.name, maxScore: tests.maxScore })
+    .from(tests)
+    .where(eq(tests.id, session.testId!))
+    .get();
+
+// Get all essay questions for this session
+const essayQs = await db
+    .select({
+        tqId: testQuestions.id,
+        orderIdx: testQuestions.orderIdx,
+        answerText: testQuestions.answerText,
+        score: testQuestions.score,
+        isAnswered: testQuestions.isAnswered,
+        essayScoreOverride: testQuestions.essayScoreOverride,
+        essayGradedBy: testQuestions.essayGradedBy,
+        essayGradedAt: testQuestions.essayGradedAt,
+        essayNotes: testQuestions.essayNotes,
+        qId: questions.id,
+        qText: questions.text,
+        qType: questions.type,
+        correctAnswer: essayConfigs.correctAnswer,
+        keywords: essayConfigs.keywords,
+        gradingMode: essayConfigs.gradingMode,
+        maxScore: essayConfigs.maxScore,
+    })
+    .from(testQuestions)
+    .innerJoin(questions, eq(testQuestions.questionId, questions.id))
+    .leftJoin(essayConfigs, eq(testQuestions.questionId, essayConfigs.questionId))
+    .where(eq(testQuestions.testUserId, sessionId))
+    .orderBy(testQuestions.orderIdx)
+    .all();
+
+// Filter only essay/short answer
+const essayOnly = essayQs.filter((q) => q.qType === 2 || q.qType === 3);
+
+// Parse keywords for each question
+const essayData = essayOnly.map((q) => ({
+    ...q,
+    keywords: q.keywords ? JSON.parse(q.keywords) : [],
+}));
+
+const gradedCount = essayData.filter(
+    (q) => q.essayGradedBy !== null && q.essayGradedBy !== undefined
+).length;
+
+const backUrl = testId ? `/admin/hasil/koreksi-esai?testId=${testId}` : "/admin/hasil/koreksi-esai";
+
+function gradingModeLabel(mode: string | null) {
+    if (mode === "keyword") return { label: "Auto: Keyword", cls: "bg-indigo-100 text-indigo-700 border-indigo-200" };
+    if (mode === "hybrid") return { label: "Auto: Hybrid", cls: "bg-purple-100 text-purple-700 border-purple-200" };
+    return { label: "Manual", cls: "bg-amber-100 text-amber-700 border-amber-200" };
+}
+---
+
+<AdminLayout title={`Koreksi Esai - ${session.firstName}`}>
+    <!-- Header -->
+    <div class="mb-6">
+        <nav class="flex text-sm text-surface-500 mb-2" aria-label="Breadcrumb">
+            <ol class="inline-flex items-center space-x-1 md:space-x-2">
+                <li><a href="/admin/hasil" class="hover:text-indigo-600 transition-colors">Hasil</a></li>
+                <li><div class="flex items-center"><i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                    <a href={backUrl} class="hover:text-indigo-600 transition-colors">Koreksi Esai</a>
+                </div></li>
+                <li><div class="flex items-center"><i class="icon-chevron-right w-4 h-4 mx-1"></i>
+                    <span class="text-surface-700 font-medium">{session.firstName}</span>
+                </div></li>
+            </ol>
+        </nav>
+
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+            <div class="flex items-center gap-3">
+                <a href={backUrl} class="p-1.5 rounded-lg hover:bg-surface-100 transition-colors text-surface-500">
+                    <i class="icon-arrow-left w-5 h-5"></i>
+                </a>
+                <div>
+                    <h2 class="text-xl font-bold text-surface-800">{session.firstName}</h2>
+                    <p class="text-sm text-surface-500 flex items-center gap-2 mt-0.5">
+                        <span class="font-mono text-xs">{session.username}</span>
+                        {session.groupName && <span>· {session.groupName}</span>}
+                        <span>·</span>
+                        <span class="font-semibold text-indigo-600">{testData?.name}</span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div class="flex items-center gap-3 bg-white border border-surface-200 rounded-xl px-4 py-2.5 shadow-sm">
+                <div>
+                    <p class="text-xs text-surface-500 font-medium">Progress Koreksi</p>
+                    <p class="text-lg font-black text-surface-800">
+                        <span id="graded-count-display">{gradedCount}</span>
+                        <span class="text-surface-400 font-light text-sm">/{essayData.length}</span>
+                    </p>
+                </div>
+                <div class="w-20">
+                    <div class="h-2 bg-surface-200 rounded-full overflow-hidden">
+                        <div
+                            id="graded-progress-bar"
+                            class="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                            style={`width: ${essayData.length > 0 ? Math.round((gradedCount / essayData.length) * 100) : 0}%`}
+                        ></div>
+                    </div>
+                    <p class="text-[10px] text-surface-400 mt-0.5 text-right" id="graded-pct-display">
+                        {essayData.length > 0 ? Math.round((gradedCount / essayData.length) * 100) : 0}%
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert: Auto-graded note -->
+    {essayData.some(q => q.gradingMode === "keyword" || q.gradingMode === "hybrid") && (
+        <div class="mb-5 p-4 rounded-xl bg-indigo-50 border border-indigo-200 flex items-start gap-3 text-sm text-indigo-700">
+            <i class="icon-info w-5 h-5 shrink-0 mt-0.5"></i>
+            <div>
+                <p class="font-semibold">Beberapa soal sudah auto-dinilai</p>
+                <p class="text-xs mt-0.5 text-indigo-600">Soal dengan mode Keyword atau Hybrid sudah mendapat skor otomatis. Anda bisa merevisi nilai jika perlu.</p>
+            </div>
+        </div>
+    )}
+
+    {essayData.length === 0 ? (
+        <div class="bg-surface-50 border border-surface-200 border-dashed rounded-2xl p-12 text-center text-surface-500">
+            <i class="icon-check-circle w-12 h-12 mx-auto mb-4 block text-surface-300"></i>
+            <p class="font-semibold">Tidak ada soal esai untuk siswa ini</p>
+        </div>
+    ) : (
+        <div class="space-y-6" id="essay-list">
+            {essayData.map((q, idx) => {
+                const modeInfo = gradingModeLabel(q.gradingMode ?? null);
+                const isGraded = q.essayGradedBy !== null && q.essayGradedBy !== undefined;
+                const currentScore = q.essayScoreOverride ?? q.score ?? 0;
+                const maxScore = q.maxScore ?? 100;
+
+                return (
+                    <div
+                        class="bg-white rounded-2xl border border-surface-200 shadow-sm overflow-hidden"
+                        id={`question-card-${q.tqId}`}
+                        data-tq-id={q.tqId}
+                        data-graded={isGraded ? "1" : "0"}
+                    >
+                        <!-- Card Header -->
+                        <div class="px-5 py-3.5 border-b border-surface-100 flex items-center justify-between bg-surface-50/70">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-sm font-black shadow-sm">
+                                    {q.orderIdx}
+                                </div>
+                                <div>
+                                    <span class="text-xs font-semibold text-surface-600">
+                                        {q.qType === 2 ? "Soal Esai" : "Jawaban Singkat"}
+                                    </span>
+                                    <span class={`ml-2 px-2 py-0.5 text-[10px] font-bold border rounded-full ${modeInfo.cls}`}>
+                                        {modeInfo.label}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                {isGraded ? (
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold uppercase graded-badge">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span> Sudah Dinilai
+                                    </span>
+                                ) : (
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-bold uppercase graded-badge">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block"></span> Belum Dinilai
+                                    </span>
+                                )}
+                                <div class="text-sm font-black text-surface-700 current-score-display">
+                                    {Math.round(currentScore * 10) / 10}
+                                    <span class="text-surface-400 font-normal text-xs">/{maxScore}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-5 space-y-4">
+                            <!-- Question Text -->
+                            <div>
+                                <p class="text-xs font-semibold text-surface-500 uppercase tracking-wide mb-2">Soal:</p>
+                                <div class="prose prose-sm max-w-none text-surface-800 bg-surface-50 rounded-lg p-3 border border-surface-100" set:html={q.qText}></div>
+                            </div>
+
+                            <!-- Keywords hint -->
+                            {q.keywords && q.keywords.length > 0 && (
+                                <div>
+                                    <p class="text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Kata Kunci Penilaian:</p>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        {q.keywords.map((kw: any) => (
+                                            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-xs text-indigo-700">
+                                                <span class="font-semibold">{kw.word}</span>
+                                                <span class="text-indigo-400">+{kw.score}pt</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <!-- Correct answer reference -->
+                            {q.correctAnswer && (
+                                <div>
+                                    <p class="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-1.5">Kunci Jawaban:</p>
+                                    <div class="text-sm text-surface-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{q.correctAnswer}</div>
+                                </div>
+                            )}
+
+                            <!-- Student Answer -->
+                            <div>
+                                <p class="text-xs font-semibold text-surface-500 uppercase tracking-wide mb-1.5">Jawaban Siswa:</p>
+                                {q.answerText && q.answerText.trim() ? (
+                                    <div class="text-sm text-surface-800 bg-slate-50 border border-slate-200 rounded-lg p-3 whitespace-pre-wrap leading-relaxed">
+                                        {q.answerText}
+                                    </div>
+                                ) : (
+                                    <div class="text-sm text-surface-400 italic bg-surface-50 border border-surface-200 rounded-lg p-3 flex items-center gap-2">
+                                        <i class="icon-minus w-3.5 h-3.5"></i> Tidak dijawab
+                                    </div>
+                                )}
+                            </div>
+
+                            <!-- Auto-score info -->
+                            {q.essayNotes && !q.essayGradedBy && (
+                                <div class="p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-xs text-indigo-700">
+                                    <i class="icon-cpu w-3.5 h-3.5 inline-block mr-1"></i>
+                                    <strong>Auto-grading:</strong> {q.essayNotes}
+                                </div>
+                            )}
+
+                            <!-- Grading Form -->
+                            <div class="border-t border-surface-100 pt-4 space-y-3">
+                                <p class="text-xs font-semibold text-surface-600 uppercase tracking-wide">Nilai Manual:</p>
+
+                                <div class="flex items-start gap-4 flex-wrap">
+                                    <!-- Score input -->
+                                    <div>
+                                        <label class="block text-xs text-surface-500 mb-1">Skor (0 – {q.maxScore ?? 100})</label>
+                                        <div class="flex items-center gap-2">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                max={q.maxScore ?? 100}
+                                                step="0.5"
+                                                value={Math.round(currentScore * 10) / 10}
+                                                class="score-input w-24 px-3 py-2 border-2 border-surface-200 rounded-lg text-sm font-bold text-center focus:border-indigo-400 focus:outline-none transition"
+                                                data-tq-id={q.tqId}
+                                                data-max={q.maxScore ?? 100}
+                                            />
+                                            <span class="text-xs text-surface-400">/ {q.maxScore ?? 100}</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Notes -->
+                                    <div class="flex-1 min-w-[200px]">
+                                        <label class="block text-xs text-surface-500 mb-1">Catatan Guru (opsional)</label>
+                                        <textarea
+                                            rows="2"
+                                            class="notes-input w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none resize-none"
+                                            placeholder="Komentar atau feedback untuk siswa..."
+                                            data-tq-id={q.tqId}
+                                        >{q.essayNotes && q.essayGradedBy ? q.essayNotes : ""}</textarea>
+                                    </div>
+                                </div>
+
+                                <!-- Save button -->
+                                <button
+                                    type="button"
+                                    class="save-btn flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition shadow-sm"
+                                    data-tq-id={q.tqId}
+                                    onclick={`saveGrade(${q.tqId})`}
+                                >
+                                    <i class="icon-save w-4 h-4"></i>
+                                    Simpan Nilai
+                                </button>
+
+                                {q.essayGradedBy && q.essayGradedAt && (
+                                    <p class="text-[11px] text-surface-400">
+                                        Terakhir dinilai: {new Date(q.essayGradedAt).toLocaleString("id-ID")}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    )}
+
+    <!-- Bottom action bar -->
+    {essayData.length > 0 && (
+        <div class="mt-6 flex flex-wrap gap-3 justify-between items-center">
+            <a href={backUrl} class="px-4 py-2.5 bg-surface-100 hover:bg-surface-200 text-surface-700 text-sm font-semibold rounded-lg transition border border-surface-200 flex items-center gap-1.5">
+                <i class="icon-arrow-left w-4 h-4"></i> Kembali ke Daftar
+            </a>
+            <div id="save-status" class="text-sm text-surface-500 hidden">
+                <i class="icon-check-circle w-4 h-4 text-emerald-500 inline-block mr-1"></i>
+                Semua perubahan tersimpan
+            </div>
+        </div>
+    )}
+</AdminLayout>
+
+<script>
+    let totalQuestions = document.querySelectorAll('[data-tq-id][id^="question-card-"]').length;
+    let gradedCount = parseInt(document.getElementById('graded-count-display')?.textContent || '0');
+
+    function updateProgressDisplay() {
+        const gradedEl = document.getElementById('graded-count-display');
+        const barEl = document.getElementById('graded-progress-bar');
+        const pctEl = document.getElementById('graded-pct-display');
+
+        if (gradedEl) gradedEl.textContent = gradedCount.toString();
+        const pct = totalQuestions > 0 ? Math.round((gradedCount / totalQuestions) * 100) : 0;
+        if (barEl) barEl.style.width = `${pct}%`;
+        if (pctEl) pctEl.textContent = `${pct}%`;
+    }
+
+    (window as any).saveGrade = async (tqId: number) => {
+        const card = document.getElementById(`question-card-${tqId}`);
+        const scoreInput = document.querySelector(`.score-input[data-tq-id="${tqId}"]`) as HTMLInputElement;
+        const notesInput = document.querySelector(`.notes-input[data-tq-id="${tqId}"]`) as HTMLTextAreaElement;
+        const saveBtn = document.querySelector(`.save-btn[data-tq-id="${tqId}"]`) as HTMLButtonElement;
+
+        if (!scoreInput) return;
+
+        const score = parseFloat(scoreInput.value);
+        const max = parseFloat(scoreInput.getAttribute('data-max') || '100');
+
+        if (isNaN(score) || score < 0 || score > max) {
+            alert(`Skor harus antara 0 dan ${max}`);
+            return;
+        }
+
+        const originalHtml = saveBtn.innerHTML;
+        saveBtn.innerHTML = `<i class="icon-loader w-4 h-4 animate-spin"></i> Menyimpan...`;
+        saveBtn.disabled = true;
+
+        try {
+            const res = await fetch('/api/admin/koreksi-esai', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    testQuestionId: tqId,
+                    score,
+                    notes: notesInput?.value || null,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                // Update badge
+                const badge = card?.querySelector('.graded-badge');
+                if (badge) {
+                    badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold uppercase graded-badge';
+                    badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span> Sudah Dinilai`;
+                }
+
+                // Update score display
+                const scoreDisplay = card?.querySelector('.current-score-display');
+                if (scoreDisplay) {
+                    scoreDisplay.innerHTML = `${score}<span class="text-surface-400 font-normal text-xs">/${max}</span>`;
+                }
+
+                // Update progress if newly graded
+                if (card?.getAttribute('data-graded') === '0') {
+                    card.setAttribute('data-graded', '1');
+                    gradedCount++;
+                    updateProgressDisplay();
+                }
+
+                // Show save status
+                const saveStatus = document.getElementById('save-status');
+                if (saveStatus) {
+                    saveStatus.classList.remove('hidden');
+                    setTimeout(() => saveStatus.classList.add('hidden'), 3000);
+                }
+
+                saveBtn.innerHTML = `<i class="icon-check w-4 h-4"></i> Tersimpan`;
+                saveBtn.className = saveBtn.className.replace('bg-indigo-600 hover:bg-indigo-500', 'bg-emerald-600 hover:bg-emerald-500');
+                setTimeout(() => {
+                    saveBtn.innerHTML = `<i class="icon-save w-4 h-4"></i> Simpan Nilai`;
+                    saveBtn.className = saveBtn.className.replace('bg-emerald-600 hover:bg-emerald-500', 'bg-indigo-600 hover:bg-indigo-500');
+                    saveBtn.disabled = false;
+                }, 2000);
+            } else {
+                alert('Gagal menyimpan: ' + data.error);
+                saveBtn.innerHTML = originalHtml;
+                saveBtn.disabled = false;
+            }
+        } catch (e) {
+            alert('Terjadi kesalahan jaringan.');
+            saveBtn.innerHTML = originalHtml;
+            saveBtn.disabled = false;
+        }
+    };
+</script>
