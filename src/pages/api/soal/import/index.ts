@@ -420,6 +420,9 @@ function htmlToTextWithNumbers(html: string): string {
     // Decode basic HTML entities
     result = result.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
     
+    // Strip Unicode RTL/LTR direction markers that Word and Quill insert (break regex parsing)
+    result = result.replace(/[\u200E\u200F\u200B\u200C\u200D\u061C\u2066\u2067\u2068\u2069\uFEFF]/g, '');
+    
     return result;
 }
 
@@ -871,7 +874,8 @@ function parseTextRegex(text: string) {
     let isExpectingNewQuestion = true;
 
     for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
+        // Strip Unicode RTL/LTR direction marks that Word/Quill inserts (these break regex ^ anchors)
+        let line = lines[i].replace(/[\u200E\u200F\u200B\u200C\u200D\u061C\u2066\u2067\u2068\u2069\uFEFF]/g, '');
 
         // More robust parsing Regex that tolerates HTML tags
         const questionMatch = line.match(/^(?:<[^>]+>)*(\d+)(?:<[^>]+>)*\.\s*(.*)/);
