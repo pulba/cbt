@@ -53,14 +53,19 @@ function extractKeywords(text: string): string {
 export const POST: APIRoute = async ({ request }) => {
     try {
         const formData = await request.formData();
-        const file = formData.get("file") as File;
+        const file = formData.get("file") as File | null;
+        const editorHtml = formData.get("editorHtml") as string | null;
         const topicIdStr = formData.get("topicId") as string;
         const questionTypeStr = formData.get("questionType") as string || "1";
         const gradingMode = formData.get("gradingMode") as string || "manual";
         const essayMaxScoreStr = formData.get("essayMaxScore") as string || "100";
 
-        if (!file || !topicIdStr) {
-            return new Response(JSON.stringify({ success: false, error: "File dan Topik ID wajib disertakan" }), { status: 400 });
+        if (!topicIdStr) {
+            return new Response(JSON.stringify({ success: false, error: "Topik ID wajib disertakan" }), { status: 400 });
+        }
+
+        if (!file && !editorHtml) {
+            return new Response(JSON.stringify({ success: false, error: "File atau konten editor wajib disertakan" }), { status: 400 });
         }
 
         const topicId = parseInt(topicIdStr);
@@ -70,10 +75,35 @@ export const POST: APIRoute = async ({ request }) => {
         const isCeklis = questionType === 5;
         const isBenarSalah = questionType === 6;
         const essayMaxScore = parseFloat(essayMaxScoreStr) || 100;
-        const fileName = file.name.toLowerCase();
-        const buffer = Buffer.from(await file.arrayBuffer());
 
         let parsedQuestions: any[] = [];
+
+        // ─── MODE 1: Smart Paste (editorHtml from Quill) ───
+        if (editorHtml) {
+            // Convert the pasted HTML to text format the parsers understand
+            let textValue = htmlToTextWithNumbers(editorHtml);
+
+            if (questionType === 7) {
+                parsedQuestions = parseMixedFormat(textValue);
+            } else if (isMatching) {
+                parsedQuestions = parseTextMatching(textValue);
+            } else if (isEssay) {
+                parsedQuestions = parseTextEssay(textValue);
+            } else if (isBenarSalah) {
+                parsedQuestions = parseTextBenarSalah(textValue);
+            } else if (isCeklis) {
+                parsedQuestions = parseTextCeklis(textValue);
+            } else {
+                parsedQuestions = parseTextHeuristics(textValue);
+                if (parsedQuestions.length === 0) {
+                    parsedQuestions = parseTextRegex(textValue);
+                }
+            }
+        }
+        // ─── MODE 2: File Upload ───
+        else if (file) {
+        const fileName = file.name.toLowerCase();
+        const buffer = Buffer.from(await file.arrayBuffer());
 
         if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
             if (isMatching) {
@@ -265,9 +295,9 @@ export const POST: APIRoute = async ({ request }) => {
                 }
             }
         } else {
-            return new Response(JSON.stringify({ success: false, error: "Format file tidak didukung. Gunakan .xlsx, .docx, atau .pdf" }), { status: 400 });
+            return new Response(JSON.stringify({ success: false, error: "Format file tidak didukung. Gunakan .xlsx atau .pdf" }), { status: 400 });
         }
-
+        } // end else if (file)
         if (parsedQuestions.length === 0) {
             return new Response(JSON.stringify({ success: false, error: "Tidak ada soal yang berhasil diekstrak. Format tidak terbaca. Pastikan format sudah sesuai." }), { status: 400 });
         }

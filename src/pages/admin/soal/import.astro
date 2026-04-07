@@ -7,6 +7,13 @@ const allTopics = await db.select().from(topics).all();
 ---
 
 <AdminLayout title="Smart Import Soal">
+    <!-- Quill CSS -->
+    <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet" />
+    <script is:inline src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+    <!-- KaTeX for math -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
+    <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+
     <div
         class="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4"
     >
@@ -195,54 +202,81 @@ const allTopics = await db.select().from(topics).all();
                         </p>
                     </div>
 
+                    <!-- Mode Tab Selector -->
                     <div>
-                        <label
-                            class="block text-sm font-medium text-surface-700 mb-1.5"
-                            >Pilih File Modul Soal <span class="text-danger"
-                                >*</span
-                            ></label
-                        >
+                        <label class="block text-sm font-medium text-surface-700 mb-2">Mode Input Soal <span class="text-danger">*</span></label>
+                        <div class="flex rounded-lg border border-surface-200 overflow-hidden mb-4" id="mode-tabs">
+                            <button type="button" data-mode="paste" class="mode-tab flex-1 px-4 py-2.5 text-sm font-semibold transition-all bg-primary-600 text-white flex items-center justify-center gap-2">
+                                <i class="icon-clipboard w-4 h-4"></i> Smart Paste
+                            </button>
+                            <button type="button" data-mode="file" class="mode-tab flex-1 px-4 py-2.5 text-sm font-semibold transition-all bg-white text-surface-600 hover:bg-surface-50 flex items-center justify-center gap-2">
+                                <i class="icon-upload-cloud w-4 h-4"></i> Upload File
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- MODE 1: Smart Paste Canvas -->
+                    <div id="paste-mode" class="space-y-3">
+                        <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs flex items-start gap-2">
+                            <i class="icon-info w-4 h-4 shrink-0 mt-0.5 text-amber-600"></i>
+                            <div>
+                                <strong>Cara Pakai:</strong> Buka file Word Anda, blok semua soal (Ctrl+A), salin (Ctrl+C), lalu tempelkan (Ctrl+V) ke kotak editor di bawah. Gambar yang ikut di-paste akan otomatis tersimpan.
+                                <br/><span class="text-amber-600 font-medium">Tips: Perkecil ukuran gambar sebelum paste agar database tidak membengkak.</span>
+                            </div>
+                        </div>
+                        <div class="bg-surface-50 border border-surface-200 rounded-t-lg border-b-0" id="paste-toolbar">
+                            <span class="ql-formats">
+                                <button class="ql-bold"></button>
+                                <button class="ql-italic"></button>
+                                <button class="ql-underline"></button>
+                            </span>
+                            <span class="ql-formats">
+                                <button class="ql-script" value="sub"></button>
+                                <button class="ql-script" value="super"></button>
+                            </span>
+                            <span class="ql-formats">
+                                <button class="ql-list" value="ordered"></button>
+                                <button class="ql-list" value="bullet"></button>
+                            </span>
+                            <span class="ql-formats">
+                                <button class="ql-image"></button>
+                                <button class="ql-formula"></button>
+                            </span>
+                            <span class="ql-formats">
+                                <button class="ql-clean"></button>
+                            </span>
+                        </div>
+                        <div id="paste-editor" class="bg-white min-h-[280px] rounded-b-lg text-sm border border-surface-200 border-t-0"></div>
+                        <p class="text-[11px] text-surface-400 flex items-center gap-1">
+                            <i class="icon-info w-3 h-3"></i>
+                            Pastikan format soal sesuai panduan di panel sebelah kanan sebelum klik Mulai Ekstraksi.
+                        </p>
+                    </div>
+
+                    <!-- MODE 2: File Upload (for xlsx, pdf) -->
+                    <div id="file-mode" class="hidden space-y-3">
                         <div
                             class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-surface-300 border-dashed rounded-xl hover:bg-surface-50 transition relative group"
                             id="drop-zone"
                         >
                             <div class="space-y-2 text-center">
-                                <i
-                                    class="icon-upload-cloud items-center mx-auto text-surface-400 w-10 h-10 mb-3 block group-hover:text-primary-500 transition-colors"
-                                ></i>
-                                <div
-                                    class="flex flex-col items-center text-sm text-surface-600"
-                                >
+                                <i class="icon-upload-cloud items-center mx-auto text-surface-400 w-10 h-10 mb-3 block group-hover:text-primary-500 transition-colors"></i>
+                                <div class="flex flex-col items-center text-sm text-surface-600">
                                     <label
                                         for="file-upload"
                                         class="relative cursor-pointer bg-white rounded-md font-medium text-primary-600 hover:text-primary-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary-500 px-3 py-1 border border-primary-200"
                                     >
                                         <span>Telusuri File</span>
-                                        <input
-                                            id="file-upload"
-                                            name="file"
-                                            type="file"
-                                            class="sr-only"
-                                            accept=".xlsx,.xls,.doc,.docx,.pdf"
-                                            required
-                                        />
+                                        <input id="file-upload" name="file" type="file" class="sr-only" accept=".xlsx,.xls,.pdf" />
                                     </label>
-                                    <p class="pl-1 mt-2">
-                                        atau seret dan lepas file ke sini
-                                    </p>
+                                    <p class="pl-1 mt-2">atau seret dan lepas file ke sini</p>
                                 </div>
-                                <p class="text-xs text-surface-500">
-                                    Excel (.xlsx), Word (.docx), atau PDF hingga
-                                    10MB.
-                                </p>
+                                <p class="text-xs text-surface-500">Excel (.xlsx) atau PDF hingga 10MB.</p>
                             </div>
                         </div>
-                        <div
-                            id="file-name-display"
-                            class="mt-3 text-sm font-medium text-primary-600 hidden flex items-center bg-primary-50 px-3 py-2 rounded-lg border border-primary-100"
-                        >
+                        <div id="file-name-display" class="text-sm font-medium text-primary-600 hidden flex items-center bg-primary-50 px-3 py-2 rounded-lg border border-primary-100">
                             <i class="icon-file-text w-4 h-4 mr-2"></i>
-                            <span id="file-name-text">filename.docx</span>
+                            <span id="file-name-text">filename.xlsx</span>
                         </div>
                     </div>
 
@@ -252,8 +286,7 @@ const allTopics = await db.select().from(topics).all();
                             id="submit-btn"
                             class="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center shadow-md shadow-primary-500/20 w-full sm:w-auto justify-center"
                         >
-                            <i class="icon-play w-4 h-4 mr-2"></i> Mulai Ekstraksi
-                            &amp; Import
+                            <i class="icon-play w-4 h-4 mr-2"></i> Mulai Ekstraksi &amp; Import
                         </button>
                     </div>
                 </form>
@@ -387,15 +420,12 @@ const allTopics = await db.select().from(topics).all();
 </AdminLayout>
 
 <script>
+    // ─── Globals ───
     const form = document.getElementById("import-form") as HTMLFormElement;
-    const fileInput = document.getElementById(
-        "file-upload",
-    ) as HTMLInputElement;
+    const fileInput = document.getElementById("file-upload") as HTMLInputElement;
     const fileNameDisplay = document.getElementById("file-name-display");
     const fileNameText = document.getElementById("file-name-text");
-    const submitBtn = document.getElementById(
-        "submit-btn",
-    ) as HTMLButtonElement;
+    const submitBtn = document.getElementById("submit-btn") as HTMLButtonElement;
     const errorAlert = document.getElementById("error-alert");
     const errorMsg = document.getElementById("error-msg");
     const successAlert = document.getElementById("success-alert");
@@ -408,6 +438,38 @@ const allTopics = await db.select().from(topics).all();
     const formatCeklis = document.getElementById("format-ceklis");
     const formatBenarSalah = document.getElementById("format-benarsalah");
     const templateMatchingBtn = document.getElementById("template-matching-btn");
+
+    // ─── Mode Tab Logic ───
+    let currentMode = 'paste'; // 'paste' or 'file'
+    const pasteMode = document.getElementById('paste-mode');
+    const fileMode = document.getElementById('file-mode');
+    const modeTabs = document.querySelectorAll('.mode-tab');
+
+    modeTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const mode = (tab as HTMLElement).dataset.mode!;
+            currentMode = mode;
+            modeTabs.forEach(t => {
+                const isActive = (t as HTMLElement).dataset.mode === mode;
+                t.classList.toggle('bg-primary-600', isActive);
+                t.classList.toggle('text-white', isActive);
+                t.classList.toggle('bg-white', !isActive);
+                t.classList.toggle('text-surface-600', !isActive);
+            });
+            if (pasteMode) pasteMode.classList.toggle('hidden', mode !== 'paste');
+            if (fileMode) fileMode.classList.toggle('hidden', mode !== 'file');
+        });
+    });
+
+    // ─── Initialize Quill (Smart Paste Editor) ───
+    (window as any).katex = (window as any).katex;
+    const quill = new (window as any).Quill('#paste-editor', {
+        modules: {
+            toolbar: '#paste-toolbar',
+        },
+        placeholder: 'Tempelkan (Ctrl+V) soal dari Microsoft Word di sini...\n\n1. Siapakah presiden pertama Indonesia?\nA. Ir. Soekarno\nB. B.J. Habibie\n...',
+        theme: 'snow',
+    });
 
     // ─── Type Selector Logic ───
     const typeCards = document.querySelectorAll('.type-card');
@@ -448,14 +510,11 @@ const allTopics = await db.select().from(topics).all();
         if (essayConfigSection) {
             essayConfigSection.classList.toggle('hidden', !isEssay);
         }
-        // Update format guide
         if (formatPg) formatPg.classList.toggle('hidden', selectedVal !== '1');
         if (formatEssay) formatEssay.classList.toggle('hidden', !isEssay);
         if (formatMatching) formatMatching.classList.toggle('hidden', !isMatching);
         if (formatCeklis) formatCeklis.classList.toggle('hidden', !isCeklis);
         if (formatBenarSalah) formatBenarSalah.classList.toggle('hidden', !isBenarSalah);
-        
-        // Show/hide matching template button
         if (templateMatchingBtn) templateMatchingBtn.classList.toggle('hidden', !isMatching);
     }
 
@@ -469,11 +528,9 @@ const allTopics = await db.select().from(topics).all();
         });
     });
 
-    // Initialize with PG selected
     updateTypeUI('1');
 
-
-    // Drag and drop handlers
+    // ─── Drag and Drop (File Mode) ───
     ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
         dropZone?.addEventListener(eventName, preventDefaults, false);
     });
@@ -484,40 +541,25 @@ const allTopics = await db.select().from(topics).all();
     }
 
     ["dragenter", "dragover"].forEach((eventName) => {
-        dropZone?.addEventListener(
-            eventName,
-            () => {
-                dropZone.classList.add("border-primary-500", "bg-primary-50");
-            },
-            false,
-        );
+        dropZone?.addEventListener(eventName, () => {
+            dropZone.classList.add("border-primary-500", "bg-primary-50");
+        }, false);
     });
 
     ["dragleave", "drop"].forEach((eventName) => {
-        dropZone?.addEventListener(
-            eventName,
-            () => {
-                dropZone.classList.remove(
-                    "border-primary-500",
-                    "bg-primary-50",
-                );
-            },
-            false,
-        );
+        dropZone?.addEventListener(eventName, () => {
+            dropZone.classList.remove("border-primary-500", "bg-primary-50");
+        }, false);
     });
 
-    dropZone?.addEventListener(
-        "drop",
-        (e: DragEvent) => {
-            const dt = e.dataTransfer;
-            const files = dt?.files;
-            if (files && files.length > 0) {
-                fileInput.files = files;
-                updateFileName();
-            }
-        },
-        false,
-    );
+    dropZone?.addEventListener("drop", (e: DragEvent) => {
+        const dt = e.dataTransfer;
+        const files = dt?.files;
+        if (files && files.length > 0) {
+            fileInput.files = files;
+            updateFileName();
+        }
+    }, false);
 
     fileInput?.addEventListener("change", updateFileName);
 
@@ -532,15 +574,26 @@ const allTopics = await db.select().from(topics).all();
         }
     }
 
+    // ─── Form Submit ───
     form?.addEventListener("submit", async (e) => {
         e.preventDefault();
 
         if (errorAlert) errorAlert.classList.add("hidden");
         if (successAlert) successAlert.classList.add("hidden");
 
-        if (!fileInput.files || fileInput.files.length === 0) {
-            showError("Pilih file terlebih dahulu.");
-            return;
+        const isPasteMode = currentMode === 'paste';
+
+        if (isPasteMode) {
+            const editorContent = quill.root.innerHTML.trim();
+            if (!editorContent || editorContent === '<p><br></p>' || editorContent === '<p></p>') {
+                showError("Kotak editor masih kosong. Silakan paste/tempel soal dari Word terlebih dahulu.");
+                return;
+            }
+        } else {
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showError("Pilih file terlebih dahulu.");
+                return;
+            }
         }
 
         const originalHtml = submitBtn.innerHTML;
@@ -549,7 +602,6 @@ const allTopics = await db.select().from(topics).all();
 
         const formData = new FormData(form);
 
-        // Add essay config as JSON if essay type
         const questionType = (document.querySelector('input[name="questionType"]:checked') as HTMLInputElement)?.value || '1';
         formData.set('questionType', questionType);
 
@@ -558,6 +610,12 @@ const allTopics = await db.select().from(topics).all();
             const maxScore = (document.getElementById('essayMaxScore') as HTMLInputElement)?.value || '100';
             formData.set('gradingMode', gradingMode);
             formData.set('essayMaxScore', maxScore);
+        }
+
+        // If Smart Paste mode, send editor HTML instead of file
+        if (isPasteMode) {
+            formData.delete('file');
+            formData.set('editorHtml', quill.root.innerHTML);
         }
 
         try {
@@ -574,6 +632,7 @@ const allTopics = await db.select().from(topics).all();
                     successAlert.classList.remove("hidden");
                 }
                 form.reset();
+                quill.root.innerHTML = '';
                 updateTypeUI('1');
                 if (fileNameDisplay) fileNameDisplay.classList.add("hidden");
                 const topicId = formData.get("topicId");
@@ -584,9 +643,7 @@ const allTopics = await db.select().from(topics).all();
                 showError(result.error || "Gagal memproses file");
             }
         } catch (error) {
-            showError(
-                "Terjadi kesalahan jaringan atau server saat mengekstrak file.",
-            );
+            showError("Terjadi kesalahan jaringan atau server saat mengekstrak.");
         } finally {
             submitBtn.innerHTML = originalHtml;
             submitBtn.disabled = false;
