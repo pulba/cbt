@@ -12,7 +12,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-
 # environment variables
 .env
 .env.production
@@ -22,3 +21,13 @@ pnpm-debug.log*
 
 # jetbrains setting folder
 .idea/
+
+# wrangler local state
+.wrangler/
+
+# temporary / scratch files
+tmp/
+*.tmp
+.tmp_*
+build_output.txt
+test_output.html
