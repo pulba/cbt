@@ -2,12 +2,8 @@ import type { APIRoute } from "astro";
 import { db } from "../../../../db";
 import { questions, questionAnswers, essayConfigs } from "../../../../db/schema";
 import * as xlsx from "xlsx";
-import mammoth from "mammoth";
-import pdfParse from "pdf-parse";
-import AdmZip from "adm-zip";
-import * as crypto from "crypto";
-import * as fs from "fs";
-import * as path from "path";
+// mammoth, pdf-parse, adm-zip, crypto, fs, path are dynamically imported
+// inside the file upload branch to avoid Cloudflare build warnings
 
 // Indonesian Stopwords List
 const INDONESIAN_STOPWORDS = new Set([
@@ -117,6 +113,11 @@ export const POST: APIRoute = async ({ request }) => {
                 parsedQuestions = parseExcel(buffer);
             }
         } else if (fileName.endsWith(".docx")) {
+            // Dynamic imports to avoid Cloudflare build warnings
+            const { default: AdmZip } = await import("adm-zip");
+            const fs = await import("fs");
+            const path = await import("path");
+
             let modifiedBuffer = buffer;
             try {
                 const zip = new AdmZip(buffer);
@@ -251,6 +252,7 @@ export const POST: APIRoute = async ({ request }) => {
                 console.error("[OMML PARSER] Error parsing docx XML:", err);
             }
 
+            const { default: mammoth } = await import("mammoth");
             const rawHtml = await mammoth.convertToHtml({ buffer: modifiedBuffer });
             let textValue = htmlToTextWithNumbers(rawHtml.value);
             
@@ -277,6 +279,7 @@ export const POST: APIRoute = async ({ request }) => {
                 }
             }
         } else if (fileName.endsWith(".pdf")) {
+            const { default: pdfParse } = await import("pdf-parse");
             const data = await pdfParse(buffer);
             if (questionType === 7) {
                 parsedQuestions = parseMixedFormat(data.text);
