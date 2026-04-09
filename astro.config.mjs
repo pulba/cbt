@@ -8,7 +8,10 @@ import cloudflare from '@astrojs/cloudflare';
 export default defineConfig({
   output: 'server',
   vite: {
-    plugins: [tailwindcss()]
+    plugins: [tailwindcss()],
+    ssr: {
+      external: ['adm-zip', 'mammoth', 'pdf-parse']
+    }
   },
   adapter: cloudflare()
 });
